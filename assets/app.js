@@ -1,7 +1,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const STORAGE_KEY = 'thing-planner-workos-v080-state';
+const STORAGE_KEY = 'thing-planner-workos-v090-state';
 const API_BASE = window.THING_PLANNER_API_BASE || '/api';
 let apiOnline = false;
 let apiStatusText = 'Local demo mode';
@@ -9,7 +9,7 @@ let hasBootstrappedApi = false;
 let suppressApiSync = false;
 let syncTimer = null;
 let lastSyncAt = null;
-let authToken = localStorage.getItem('thing-planner-workos-v080-token') || null;
+let authToken = localStorage.getItem('thing-planner-workos-v090-token') || null;
 let currentUser = null;
 let authStatusText = 'Demo auth pending';
 let lastReportDataset = null;
@@ -25,7 +25,7 @@ const seedState = {
   knowledgeQuery: '',
   helper: true,
   aiPromo: true,
-  version: '0.8.0',
+  version: '0.9.0',
   workspace: {
     name: "Adrian Francis's Workspace",
     initials: 'A',
@@ -131,6 +131,7 @@ const seedState = {
 let state = loadState();
 ensurePlannerState();
 ensureGanttState();
+ensureWhiteboardState();
 let activeHomeTab = 'Primary';
 let formBuilderOpen = false;
 let selectedTaskId = null;
@@ -192,7 +193,7 @@ async function ensureDemoAuth() {
       const data = await response.json();
       authToken = data.token;
       currentUser = data.user;
-      localStorage.setItem('thing-planner-workos-v080-token', authToken);
+      localStorage.setItem('thing-planner-workos-v090-token', authToken);
       authStatusText = `Demo auth: ${currentUser.display_name || currentUser.email}`;
     }
   } catch (error) {
@@ -210,7 +211,7 @@ async function hydrateFromApi() {
     if (!response.ok) throw new Error('State fetch failed');
     const data = await response.json();
     apiOnline = true;
-    apiStatusText = `${healthJson.version || 'v0.8.0'} ${healthJson.schema || 'API'} connected`;
+    apiStatusText = `${healthJson.version || 'v0.9.0'} ${healthJson.schema || 'API'} connected`;
     await ensureDemoAuth();
     hasBootstrappedApi = true;
     if (data && data.state) {
@@ -326,7 +327,7 @@ function renderTopbar() {
       </button>
       <button class="top-icon" onclick="setModule('planner')">▣</button>
       <button class="top-icon" onclick="toast('No workspace warnings today')">⚠</button>
-      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.8 Docs/knowledge/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
+      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.9 Whiteboards/canvas/mind maps/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
     </div>
     <div class="global-search-wrap">
       <label class="global-search"><span>⌕</span><input id="globalSearch" placeholder="Search ⌘K" onkeydown="if(event.key==='Enter') globalSearch(this.value)" /></label>
@@ -515,13 +516,17 @@ function renderDocsSidebar() {
 }
 
 function renderWhiteboardSidebar() {
-  return baseSidebar('Whiteboards', "toast('New whiteboard')", `
+  ensureWhiteboardState();
+  return baseSidebar('Whiteboards', "createWhiteboard()", `
     <div class="side-nav">
-      <div class="side-item active"><span>✎</span><span>All Whiteboards</span></div>
-      <div class="side-item"><span>🧠</span><span>Mind Maps</span></div>
-      <div class="side-item"><span>▧</span><span>Canvas</span></div>
+      <div class="side-item ${state.visualTab==='whiteboard' ? 'active' : ''}" onclick="setVisualTab('whiteboard')"><span>✎</span><span>All Whiteboards</span></div>
+      <div class="side-item ${state.visualTab==='mindmap' ? 'active' : ''}" onclick="setVisualTab('mindmap')"><span>🧠</span><span>Mind Maps</span></div>
+      <div class="side-item ${state.visualTab==='canvas' ? 'active' : ''}" onclick="setVisualTab('canvas')"><span>▧</span><span>Canvas</span></div>
       <div class="side-item"><span>⭐</span><span>Favorites</span></div>
     </div>
+    <div class="hr"></div>
+    <div class="side-section">Boards</div>
+    ${(state.whiteboards||[]).map(w=>`<div class="side-item ${state.selectedWhiteboard===w.id?'active':''}" onclick="selectWhiteboard('${w.id}')"><span>${w.icon||'✎'}</span><span class="label">${escapeHtml(w.name)}</span></div>`).join('')}
   `);
 }
 
@@ -1549,7 +1554,7 @@ function renderDataLayerCards() {
   const submissions = (state.formSubmissions || []).length;
   const runs = (state.automationRuns || []).length;
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.8 Docs + Knowledge</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • intake actions enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Forms</span><h3>Submissions</h3><div class="value">${submissions}</div><div class="trend">AI analysis and task routing available</div><button class="btn-secondary" onclick="setModule('forms')">Open forms</button></div>
     <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">/api/automations and /api/automations/run</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
@@ -1680,10 +1685,163 @@ function renderDataLayerCards() {
   const blocks = (state.plannerBlocks || []).length;
   const events = (state.calendarEvents || []).length;
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.8 Docs + Knowledge</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • scheduling enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Planner</span><h3>Schedule objects</h3><div class="value">${blocks + events}</div><div class="trend">${blocks} planner blocks • ${events} calendar events</div><button class="btn-secondary" onclick="setModule('planner')">Open planner</button></div>
     <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/docs, /api/knowledge, /api/gantt, /api/planner</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
+  </div>`;
+}
+
+
+
+/* v0.9 Visual Collaboration / Whiteboards + Canvas + Mind Maps */
+function defaultWhiteboardSeed(){
+  return [{
+    id:'wb1', name:'Launch Planning Board', icon:'✎', owner:'Adrian Francis', updated:'Today', favorite:true,
+    objects:[
+      {id:'wbo1', type:'sticky', text:'Project idea\n\nAI turns this into a project plan.', color:'yellow', x:72, y:86, w:180, h:126, taskId:null},
+      {id:'wbo2', type:'sticky', text:'Dashboard card\n\nLive KPI with task drill-down.', color:'blue', x:330, y:164, w:184, h:126, taskId:'t4'},
+      {id:'wbo3', type:'sticky', text:'Form intake\n\nCentralize requests and trigger workflows.', color:'pink', x:562, y:92, w:190, h:126, taskId:'t5'},
+      {id:'wbo4', type:'sticky', text:'Automation\n\nEscalate blocked work automatically.', color:'green', x:790, y:236, w:190, h:126, taskId:null},
+      {id:'wbo5', type:'task', text:'Campaign dashboard wireframe', color:'purple', x:314, y:356, w:248, h:96, taskId:'t4'},
+      {id:'wbo6', type:'doc', text:'Project Charter', color:'white', x:90, y:310, w:220, h:92, docId:'doc1'}
+    ],
+    edges:[
+      {id:'edge1', from:'wbo1', to:'wbo2', label:'plan'},
+      {id:'edge2', from:'wbo2', to:'wbo3', label:'insight'},
+      {id:'edge3', from:'wbo3', to:'wbo4', label:'trigger'},
+      {id:'edge4', from:'wbo1', to:'wbo6', label:'document'},
+      {id:'edge5', from:'wbo2', to:'wbo5', label:'work item'}
+    ],
+    canvasCards:[
+      {id:'cc1', title:'Execution Hub', kind:'Project', metric:'8 tasks', x:40, y:40, linkedType:'list', linkedId:'p1'},
+      {id:'cc2', title:'AI Risk Watch', kind:'AI Card', metric:'2 risks', x:322, y:46, linkedType:'dashboard', linkedId:'d1'},
+      {id:'cc3', title:'Intake Flow', kind:'Form', metric:'3 submissions', x:606, y:48, linkedType:'form', linkedId:'form1'},
+      {id:'cc4', title:'Knowledge Base', kind:'Docs', metric:'3 docs', x:178, y:250, linkedType:'doc', linkedId:'doc1'},
+      {id:'cc5', title:'Critical Path', kind:'Gantt', metric:'3 critical tasks', x:486, y:250, linkedType:'gantt', linkedId:'p1'}
+    ],
+    mindMap:{
+      root:{id:'mm-root', label:'Thing Planner WorkOS', kind:'root'},
+      nodes:[
+        {id:'mm-tasks', parent:'mm-root', label:'Tasks & Projects', kind:'module', linkedType:'module', linkedId:'spaces'},
+        {id:'mm-reports', parent:'mm-root', label:'Reports & Dashboards', kind:'module', linkedType:'module', linkedId:'dashboards'},
+        {id:'mm-ai', parent:'mm-root', label:'AI Agents', kind:'module', linkedType:'module', linkedId:'ai'},
+        {id:'mm-forms', parent:'mm-root', label:'Forms + Intake', kind:'module', linkedType:'module', linkedId:'forms'},
+        {id:'mm-docs', parent:'mm-root', label:'Docs + Decisions', kind:'module', linkedType:'module', linkedId:'docs'},
+        {id:'mm-gantt', parent:'mm-tasks', label:'Critical Path', kind:'feature', linkedType:'view', linkedId:'gantt'},
+        {id:'mm-board', parent:'mm-tasks', label:'Kanban Board', kind:'feature', linkedType:'view', linkedId:'board'},
+        {id:'mm-ai-summary', parent:'mm-ai', label:'Status Reports', kind:'feature', linkedType:'action', linkedId:'ai-summary'},
+        {id:'mm-submissions', parent:'mm-forms', label:'Task Creation', kind:'feature', linkedType:'action', linkedId:'form-task'},
+        {id:'mm-decisions', parent:'mm-docs', label:'Decision Records', kind:'feature', linkedType:'action', linkedId:'decisions'}
+      ]
+    }
+  }];
+}
+function ensureWhiteboardState(){
+  if(!state.whiteboards || !Array.isArray(state.whiteboards) || state.whiteboards.length===0) state.whiteboards=defaultWhiteboardSeed();
+  if(!state.selectedWhiteboard) state.selectedWhiteboard=state.whiteboards[0]?.id || 'wb1';
+  if(!state.visualTab) state.visualTab='whiteboard';
+  if(!state.whiteboardAiInsights) state.whiteboardAiInsights=[];
+}
+function selectedWhiteboard(){ ensureWhiteboardState(); return state.whiteboards.find(w=>w.id===state.selectedWhiteboard) || state.whiteboards[0]; }
+function setVisualTab(tab){ state.visualTab=tab; render(); }
+function selectWhiteboard(id){ state.selectedWhiteboard=id; render(); }
+function whiteboardStats(w){
+  const objects=w.objects||[], edges=w.edges||[], cards=w.canvasCards||[], nodes=w.mindMap?.nodes||[];
+  const linkedTasks=objects.filter(o=>o.taskId).length + cards.filter(c=>c.linkedType==='task').length;
+  return {objects:objects.length, edges:edges.length, canvasCards:cards.length, mindNodes:nodes.length+1, linkedTasks};
+}
+function renderWhiteboardsMain() {
+  ensureWhiteboardState();
+  const w=selectedWhiteboard(); const stats=whiteboardStats(w);
+  return `<div class="content wide">
+    <div class="section-title"><div><h2>Visual Collaboration</h2><p style="margin:4px 0 0;color:var(--muted)">Whiteboards, canvas planning, and mind maps that convert ideas into coordinated action.</p></div><div class="toolbar-right"><button class="btn-secondary" onclick="refreshWhiteboardsFromApi()">Refresh</button><button class="btn-secondary" onclick="runWhiteboardAI()">✽ AI summarize</button><button class="btn-primary" onclick="addSticky()">＋ Sticky</button></div></div>
+    <div class="visual-kpis">
+      ${visualKpi('Objects', stats.objects, 'sticky notes, tasks, docs')}
+      ${visualKpi('Connected edges', stats.edges, 'relationships mapped')}
+      ${visualKpi('Canvas cards', stats.canvasCards, 'live planning blocks')}
+      ${visualKpi('Mind map nodes', stats.mindNodes, 'hierarchy concepts')}
+    </div>
+    <div class="visual-shell">
+      <div class="visual-board-list">
+        <div class="visual-board-head">Boards <button class="icon-btn flat" onclick="createWhiteboard()">＋</button></div>
+        ${(state.whiteboards||[]).map(b=>`<button class="visual-board-row ${b.id===w.id?'active':''}" onclick="selectWhiteboard('${b.id}')"><span>${b.icon||'✎'}</span><span><b>${escapeHtml(b.name)}</b><em>${(b.objects||[]).length} objects • ${b.updated||'Today'}</em></span></button>`).join('')}
+        <div class="visual-ai-card"><b>✽ AI board readout</b><p>${escapeHtml((state.whiteboardAiInsights||[])[0]?.summary || 'Run AI summarize to turn this board into tasks, risks, and decisions.')}</p></div>
+      </div>
+      <div class="visual-workspace">
+        <div class="visual-tabs">
+          <button class="tab ${state.visualTab==='whiteboard'?'active':''}" onclick="setVisualTab('whiteboard')">✎ Whiteboard</button>
+          <button class="tab ${state.visualTab==='canvas'?'active':''}" onclick="setVisualTab('canvas')">▧ Canvas</button>
+          <button class="tab ${state.visualTab==='mindmap'?'active':''}" onclick="setVisualTab('mindmap')">🧠 Mind Map</button>
+          <button class="tab" onclick="convertStickyToTask()">☑ Convert to task</button>
+        </div>
+        ${state.visualTab==='canvas' ? renderCanvasStudio(w) : state.visualTab==='mindmap' ? renderMindMapStudio(w) : renderWhiteboardStudio(w)}
+      </div>
+    </div>
+  </div>`;
+}
+function visualKpi(label,value,trend){ return `<div class="kpi-card visual-kpi"><span class="label">${escapeHtml(label)}</span><div class="value">${value}</div><div class="trend">${escapeHtml(trend)}</div></div>`; }
+function renderWhiteboardStudio(w){
+  return `<div class="whiteboard-canvas v09">
+    ${(w.edges||[]).map(e=>renderWhiteboardEdge(w,e)).join('')}
+    ${(w.objects||[]).map(o=>renderWhiteboardObject(o)).join('')}
+    <div class="whiteboard-toolbar"><button onclick="addSticky()">Sticky</button><button onclick="linkObjectToTask()">Link task</button><button onclick="runWhiteboardAI()">AI actions</button></div>
+  </div>`;
+}
+function renderWhiteboardObject(o){
+  const style=`left:${Number(o.x||0)}px;top:${Number(o.y||0)}px;width:${Number(o.w||180)}px;min-height:${Number(o.h||110)}px`;
+  const task=o.taskId ? state.tasks.find(t=>t.id===o.taskId) : null;
+  return `<div class="visual-object ${escapeHtml(o.type||'sticky')} ${escapeHtml(o.color||'yellow')}" style="${style}" onclick="selectVisualObject('${o.id}')"><div class="visual-object-type">${objectIcon(o.type)} ${escapeHtml(o.type||'sticky')}</div><b>${escapeHtml(firstLine(o.text))}</b><p>${escapeHtml(restLines(o.text))}</p>${task?`<button class="mini-link" onclick="event.stopPropagation(); openTask('${task.id}')">☑ ${escapeHtml(task.name)}</button>`:''}</div>`;
+}
+function renderWhiteboardEdge(w,e){
+  const from=(w.objects||[]).find(o=>o.id===e.from), to=(w.objects||[]).find(o=>o.id===e.to); if(!from||!to) return '';
+  const x1=Number(from.x||0)+Number(from.w||180), y1=Number(from.y||0)+Number(from.h||110)/2, x2=Number(to.x||0), y2=Number(to.y||0)+Number(to.h||110)/2;
+  const dx=x2-x1, dy=y2-y1, len=Math.max(28, Math.sqrt(dx*dx+dy*dy)), angle=Math.atan2(dy,dx)*180/Math.PI;
+  return `<div class="visual-edge" style="left:${x1}px;top:${y1}px;width:${len}px;transform:rotate(${angle}deg)"><span>${escapeHtml(e.label||'')}</span></div>`;
+}
+function renderCanvasStudio(w){
+  return `<div class="canvas-studio"><div class="canvas-actions"><button class="btn-secondary btn-small" onclick="addCanvasCard()">＋ Live card</button><button class="btn-secondary btn-small" onclick="toast('Canvas layout saved')">Save layout</button></div>${(w.canvasCards||[]).map(c=>`<div class="canvas-card" style="left:${c.x}px;top:${c.y}px" onclick="openCanvasLink('${c.linkedType}','${c.linkedId}')"><span class="badge purple">${escapeHtml(c.kind)}</span><h3>${escapeHtml(c.title)}</h3><div class="value">${escapeHtml(c.metric)}</div><p>${escapeHtml(c.linkedType)} / ${escapeHtml(c.linkedId)}</p></div>`).join('')}</div>`;
+}
+function renderMindMapStudio(w){
+  const nodes=w.mindMap?.nodes||[]; const root=w.mindMap?.root||{id:'root',label:w.name};
+  const first=nodes.filter(n=>n.parent===root.id); const children=id=>nodes.filter(n=>n.parent===id);
+  return `<div class="mindmap-studio"><div class="mind-root">${escapeHtml(root.label)}</div><div class="mind-branches">${first.map((n,i)=>`<div class="mind-branch"><button class="mind-node ${n.kind}" onclick="openCanvasLink('${n.linkedType}','${n.linkedId}')">${escapeHtml(n.label)}</button><div class="mind-children">${children(n.id).map(ch=>`<button class="mind-node child" onclick="openCanvasLink('${ch.linkedType}','${ch.linkedId}')">${escapeHtml(ch.label)}</button>`).join('')}</div></div>`).join('')}</div></div>`;
+}
+function objectIcon(type){ return {sticky:'▨', task:'☑', doc:'▤', decision:'◆'}[type] || '▨'; }
+function firstLine(text){ return String(text||'').split('\n')[0] || 'Untitled'; }
+function restLines(text){ const parts=String(text||'').split('\n').slice(1).join(' ').trim(); return parts || 'Add context, then convert this idea into work.'; }
+function selectVisualObject(id){ state.selectedVisualObject=id; toast('Selected visual object'); saveState(); }
+function createWhiteboard(){ ensureWhiteboardState(); const id=uid(); state.whiteboards.unshift({id, name:`New Strategy Board ${state.whiteboards.length+1}`, icon:'✎', owner:'Adrian Francis', updated:'Now', favorite:false, objects:[], edges:[], canvasCards:[], mindMap:{root:{id:'root',label:'New Strategy'},nodes:[]}}); state.selectedWhiteboard=id; saveState(); render(); toast('Whiteboard created'); }
+function addSticky(){ const w=selectedWhiteboard(); const id=uid(); w.objects=w.objects||[]; w.objects.push({id,type:'sticky',text:'New idea\n\nClick AI summarize or convert to task.',color:['yellow','blue','pink','green'][w.objects.length%4],x:90+(w.objects.length*42)%650,y:80+(w.objects.length*58)%330,w:182,h:126}); w.updated='Now'; saveState(); render(); toast('Sticky note added'); }
+function addCanvasCard(){ const w=selectedWhiteboard(); w.canvasCards=w.canvasCards||[]; w.canvasCards.push({id:uid(),title:'Live Work Card',kind:'Task Rollup',metric:`${state.tasks.filter(t=>t.status!=='DONE').length} open`,x:80+(w.canvasCards.length*60)%540,y:100+(w.canvasCards.length*72)%300,linkedType:'dashboard',linkedId:'d1'}); w.updated='Now'; saveState(); render(); toast('Canvas card added'); }
+function convertStickyToTask(){ const w=selectedWhiteboard(); const obj=(w.objects||[]).find(o=>o.id===state.selectedVisualObject) || (w.objects||[]).find(o=>o.type==='sticky'&&!o.taskId) || (w.objects||[])[0]; if(!obj){ toast('Add a sticky note first'); return; } const title=firstLine(obj.text); const task={id:uid(), projectId:state.selectedProject||'p1', name:title, assignee:'adrian', due:new Date(Date.now()+86400000*5).toISOString().slice(0,10), priority:'Normal', status:'TO DO', comments:[{by:'WorkMind',text:'Created from v0.9 visual collaboration board.'}], estimate:2, tracked:0, billable:false, tags:['Whiteboard'], progress:0, description:restLines(obj.text), start:new Date().toISOString().slice(0,10), duration:2, critical:false}; state.tasks.push(task); obj.taskId=task.id; w.updated='Now'; saveState(); render(); toast('Sticky converted to task'); }
+function linkObjectToTask(){ const w=selectedWhiteboard(); const obj=(w.objects||[]).find(o=>o.id===state.selectedVisualObject) || (w.objects||[])[0]; const task=state.tasks.find(t=>t.status==='BLOCKED') || state.tasks.find(t=>t.status!=='DONE'); if(!obj||!task){ toast('Need an object and a task to link'); return; } obj.taskId=task.id; w.updated='Now'; saveState(); render(); toast(`Linked to ${task.name}`); }
+function openCanvasLink(type,id){ if(type==='module'){ setModule(id); return; } if(type==='task'){ openTask(id); return; } if(type==='doc'){ state.selectedDoc=id; setModule('docs'); return; } if(type==='form'){ setModule('forms'); return; } if(type==='dashboard'){ setModule('dashboards'); return; } if(type==='gantt'||id==='gantt'){ state.module='spaces'; state.view='gantt'; render(); return; } toast(`${type || 'Link'} opened`); }
+function localWhiteboardAI(w){ const stats=whiteboardStats(w); const blockers=state.tasks.filter(t=>t.status==='BLOCKED'); return {summary:`${w.name} has ${stats.objects} objects, ${stats.edges} relationships, ${stats.linkedTasks} linked task references, and ${stats.canvasCards} canvas cards. AI recommends converting unlinked ideas to tasks and reviewing ${blockers.length} blocker(s).`, actions:['Convert the highest-value sticky into a task','Link the Form Intake note to the project intake workflow','Review critical-path blockers before the next status report'], risks:blockers.map(t=>t.name).slice(0,3)}; }
+async function runWhiteboardAI(){ const w=selectedWhiteboard(); if(apiOnline){ try{ const res=await fetch(`${API_BASE}/whiteboards/${w.id}/ai-summary`,{method:'POST',headers:authHeaders()}); if(res.ok){ const data=await res.json(); if(data.whiteboards) state.whiteboards=data.whiteboards; state.whiteboardAiInsights=[data.summary]; toast('AI visual summary generated'); saveState(); render(); return; }}catch(e){ console.warn(e); }} state.whiteboardAiInsights=[localWhiteboardAI(w)]; toast('AI visual summary generated locally'); saveState(); render(); }
+async function refreshWhiteboardsFromApi(){ ensureWhiteboardState(); if(!apiOnline){ toast('Whiteboards running locally'); render(); return; } try{ const res=await fetch(`${API_BASE}/whiteboards`,{headers:authHeaders(),cache:'no-store'}); if(!res.ok) throw new Error('Whiteboard API failed'); const data=await res.json(); state.whiteboards=data.whiteboards||state.whiteboards; if(!state.selectedWhiteboard&&state.whiteboards[0]) state.selectedWhiteboard=state.whiteboards[0].id; toast('Whiteboards refreshed from API'); saveState(); render(); }catch(e){ console.warn(e); toast('Whiteboard API unavailable; using local boards'); } }
+
+
+function showDataLayerStatus() {
+  const message = apiOnline
+    ? `Connected to the v0.9 visual collaboration API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
+    : 'Running in local fallback mode. Start Docker Compose to enable FastAPI persistence for whiteboards, canvas cards, and mind maps.';
+  toast(message);
+}
+function renderDataLayerCards() {
+  ensureWhiteboardState();
+  const tasks = state.tasks.length;
+  const projects = state.spaces.flatMap(s => s.folders || []).flatMap(f => f.lists || []).filter(l => l.kind === 'project').length;
+  const comments = state.tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0);
+  const submissions = (state.formSubmissions || []).length;
+  const runs = (state.automationRuns || []).length;
+  const whiteboardCount = (state.whiteboards || []).length;
+  const visualObjects = (state.whiteboards || []).reduce((sum,w)=>sum+(w.objects||[]).length+(w.canvasCards||[]).length+(w.mindMap?.nodes||[]).length,0);
+  return `<div class="cards-grid">
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • visual links enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
+    <div class="kpi-card"><span class="badge purple">Whiteboards</span><h3>Visual objects</h3><div class="value">${visualObjects}</div><div class="trend">${whiteboardCount} boards • canvas cards and mind maps</div><button class="btn-secondary" onclick="setModule('whiteboards')">Open whiteboards</button></div>
+    <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/whiteboards, /api/docs, /api/gantt</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
   </div>`;
 }
 
@@ -1776,6 +1934,19 @@ window.showDataLayerStatus = showDataLayerStatus;
 window.syncStateToApi = syncStateToApi;
 window.ensureDemoAuth = ensureDemoAuth;
 window.dismissBanner = dismissBanner;
+
+
+window.setVisualTab = setVisualTab;
+window.selectWhiteboard = selectWhiteboard;
+window.createWhiteboard = createWhiteboard;
+window.addSticky = addSticky;
+window.addCanvasCard = addCanvasCard;
+window.convertStickyToTask = convertStickyToTask;
+window.linkObjectToTask = linkObjectToTask;
+window.runWhiteboardAI = runWhiteboardAI;
+window.refreshWhiteboardsFromApi = refreshWhiteboardsFromApi;
+window.selectVisualObject = selectVisualObject;
+window.openCanvasLink = openCanvasLink;
 
 render();
 hydrateFromApi();

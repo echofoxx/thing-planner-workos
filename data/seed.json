@@ -21,9 +21,9 @@
     "Goals",
     "More"
   ],
-  "release": "v0.6.0",
-  "backend": "FastAPI + PostgreSQL persistence + reporting engine",
-  "version": "0.8.0",
+  "release": "v0.9.0",
+  "backend": "FastAPI + PostgreSQL persistence + visual collaboration engine",
+  "version": "0.9.0",
   "formSubmissions": [],
   "automationRuns": [],
   "taskDependencies": [

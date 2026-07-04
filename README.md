@@ -1,46 +1,41 @@
-# Thing Planner WorkOS v0.8.0
+# Thing Planner WorkOS v0.9.0
 
-**Thing Planner WorkOS** is an AI-native project management/work operating system prototype inspired by modern all-in-one productivity platforms. It includes a ClickUp-style workspace shell, tasks, boards, dashboards, reports, forms, automations, planner, Gantt, docs, wiki, decisions, AI assistant, and a normalized API/data foundation.
+**Thing Planner WorkOS** is an AI-native project management/work operating system prototype inspired by modern all-in-one productivity platforms. It includes a ClickUp-style workspace shell, tasks, boards, dashboards, reports, forms, automations, planner, Gantt, docs, wiki, decisions, AI assistant, whiteboards, canvas planning, mind maps, and a normalized API/data foundation.
 
-## v0.8.0 release theme
+## v0.9.0 release theme
 
-**Docs + Knowledge / Wiki Engine**
+**Whiteboards + Canvas / Mind Map Engine**
 
-v0.8.0 turns Docs from placeholders into an operational knowledge layer. The app now supports normalized docs, wiki pages, version history, structured decision records, task-linked knowledge, knowledge search, and AI document summaries.
+v0.9.0 turns the Whiteboards module from a static placeholder into an operational visual collaboration workspace. Ideas can be mapped as sticky notes, connected to tasks/docs, visualized as live canvas cards, expanded into a mind map, and summarized by AI into action items.
 
-## What changed in v0.8.0
+## What changed in v0.9.0
 
-- New normalized knowledge tables:
-  - `doc_pages`
-  - `doc_versions`
-  - `doc_task_links`
-  - `doc_decisions`
-- New Docs and Knowledge API endpoints:
-  - `GET /api/docs`
-  - `GET /api/docs/{doc_id}`
-  - `POST /api/docs`
-  - `PATCH /api/docs/{doc_id}`
-  - `POST /api/docs/{doc_id}/links`
-  - `POST /api/docs/{doc_id}/decisions`
-  - `POST /api/docs/{doc_id}/ai-summary`
-  - `GET /api/knowledge/search?q=...`
-  - `GET /api/knowledge/hub`
-- Docs module upgrades:
-  - Knowledge command center KPI cards
-  - Docs/wiki/decision search
-  - Doc list and editor workbench
-  - Markdown-style editing area
-  - Page tabs and version history panel
-  - Linked-task insight panel
-  - Structured decisions panel
-  - AI document brief modal
-  - Local fallback mode when API is offline
-- Knowledge automation support:
-  - `auto_doc_decision`
-  - `auto_doc_ai_summary`
-  - automation run records when decisions are captured or AI summaries are generated
-- `/api/state` now serializes doc content, pages, decision counts, link counts, and knowledge stats into the frontend state.
-- `/api/health` now reports Docs/Knowledge table counts.
+- New normalized visual collaboration tables:
+  - `whiteboards`
+  - `whiteboard_objects`
+  - `whiteboard_edges`
+  - `canvas_cards`
+  - `mind_map_nodes`
+- New Whiteboard API endpoints:
+  - `GET /api/whiteboards`
+  - `GET /api/whiteboards/{whiteboard_id}`
+  - `POST /api/whiteboards`
+  - `POST /api/whiteboards/{whiteboard_id}/objects`
+  - `POST /api/whiteboards/{whiteboard_id}/canvas-cards`
+  - `POST /api/whiteboards/{whiteboard_id}/mind-map-nodes`
+  - `POST /api/whiteboards/{whiteboard_id}/ai-summary`
+- Whiteboards module upgrades:
+  - Board list with selected-board switching
+  - Visual KPI cards for objects, edges, canvas cards, and mind-map nodes
+  - Interactive visual workspace tabs: Whiteboard, Canvas, Mind Map
+  - Sticky notes, task cards, doc cards, and relationship edges
+  - Select visual object, link object to task, and convert sticky note to task
+  - Canvas cards linked to project/list, dashboard, form, doc, and Gantt work
+  - Mind map view for the WorkOS module hierarchy and feature breakdown
+  - AI visual summary with action items and risk prompts
+  - Local fallback mode when the API is offline
+- `/api/state` now serializes whiteboards, objects, canvas cards, and mind maps into the frontend state.
+- `/api/health` now reports visual collaboration table counts.
 
 ## What was already included
 
@@ -85,6 +80,8 @@ v0.8.0 turns Docs from placeholders into an operational knowledge layer. The app
   - schedule risk alerts
   - baselines
   - dependency-aware rescheduling
+- v0.8 Docs/knowledge:
+  - docs, wiki pages, versions, decision records, linked-task records, AI document summaries, and knowledge search
 
 ## Demo login
 
@@ -99,8 +96,8 @@ The frontend auto-runs demo auth when the API is available.
 
 ```powershell
 cd C:\docker
-Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.8.0.zip" "C:\docker\thing-planner-workos-v0.8.0"
-cd C:\docker\thing-planner-workos-v0.8.0\thing-planner-workos-v0.8.0
+Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.9.0.zip" "C:\docker\thing-planner-workos-v0.9.0"
+cd C:\docker\thing-planner-workos-v0.9.0\thing-planner-workos-v0.9.0
 docker compose up --build -d
 ```
 
@@ -136,11 +133,11 @@ Use your clean repo folder:
 cd C:\docker\thing-planner-workos-git
 ```
 
-Copy v0.8.0 into the repo:
+Copy v0.9.0 into the repo:
 
 ```powershell
 robocopy `
-  "C:\docker\thing-planner-workos-v0.8.0\thing-planner-workos-v0.8.0" `
+  "C:\docker\thing-planner-workos-v0.9.0\thing-planner-workos-v0.9.0" `
   "C:\docker\thing-planner-workos-git" `
   /MIR `
   /XD .git .venv __pycache__ `
@@ -152,22 +149,24 @@ Commit and tag:
 ```powershell
 git status
 git add .
-git commit -m "Release Thing Planner WorkOS v0.8.0"
+git commit -m "Release Thing Planner WorkOS v0.9.0"
 git push origin main
 
-git tag -f v0.8.0
-git push origin v0.8.0 --force
+git tag -f v0.9.0
+git push origin v0.9.0 --force
 ```
 
 ## Recommended next build
 
-**v0.9.0 Whiteboards + Canvas / Mind Map Engine**
+**v1.0.0 Production Demo Hardening**
 
 Recommended scope:
 
-- persistent whiteboards
-- sticky notes, shapes, connectors, and embedded task cards
-- convert sticky note to task
-- canvas cards linked to dashboards, goals, docs, and Gantt tasks
-- mind map view for task hierarchy and project breakdown
-- AI whiteboard summary and action-plan generation
+- polished auth/login page and workspace onboarding
+- migration-safe database startup
+- API error handling and validation pass
+- full release documentation and screenshots
+- seeded executive demo workspace
+- GitHub Actions / local smoke-test script
+- production Docker compose cleanup
+- UI polish and bug sweep across all modules

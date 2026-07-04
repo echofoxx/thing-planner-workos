@@ -34,7 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 
-APP_VERSION = "v0.8.0"
+APP_VERSION = "v0.9.0"
 DEFAULT_WORKSPACE_ID = "w1"
 DEFAULT_OWNER_ID = "adrian"
 SEED_PATH = Path(__file__).with_name("seed_state.json")
@@ -319,6 +319,91 @@ doc_decisions = Table(
     Column("owner", String(255), nullable=False, default="Adrian Francis"),
     Column("status", String(64), nullable=False, default="Accepted"),
     Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+
+# v0.9 Visual Collaboration / Whiteboards + Canvas + Mind Maps tables
+whiteboards = Table(
+    "whiteboards",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("name", String(255), nullable=False),
+    Column("icon", String(32), nullable=False, default="✎"),
+    Column("owner", String(255), nullable=False, default="Adrian Francis"),
+    Column("favorite", Boolean, nullable=False, default=False),
+    Column("updated", String(64), nullable=False, default="Today"),
+    Column("metadata_json", JSON, nullable=False, default=dict),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+whiteboard_objects = Table(
+    "whiteboard_objects",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("whiteboard_id", String(64), ForeignKey("whiteboards.id"), nullable=False),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("object_type", String(64), nullable=False, default="sticky"),
+    Column("text", Text, nullable=False, default=""),
+    Column("color", String(32), nullable=False, default="yellow"),
+    Column("x", Integer, nullable=False, default=80),
+    Column("y", Integer, nullable=False, default=80),
+    Column("w", Integer, nullable=False, default=180),
+    Column("h", Integer, nullable=False, default=120),
+    Column("task_id", String(64), ForeignKey("tasks.id"), nullable=True),
+    Column("doc_id", String(64), ForeignKey("docs.id"), nullable=True),
+    Column("metadata_json", JSON, nullable=False, default=dict),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+whiteboard_edges = Table(
+    "whiteboard_edges",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("whiteboard_id", String(64), ForeignKey("whiteboards.id"), nullable=False),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("from_object_id", String(64), nullable=False),
+    Column("to_object_id", String(64), nullable=False),
+    Column("label", String(128), nullable=False, default="relates"),
+    Column("metadata_json", JSON, nullable=False, default=dict),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+canvas_cards = Table(
+    "canvas_cards",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("whiteboard_id", String(64), ForeignKey("whiteboards.id"), nullable=False),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("title", String(255), nullable=False),
+    Column("kind", String(128), nullable=False, default="Card"),
+    Column("metric", String(128), nullable=False, default=""),
+    Column("x", Integer, nullable=False, default=80),
+    Column("y", Integer, nullable=False, default=80),
+    Column("linked_type", String(64), nullable=False, default="module"),
+    Column("linked_id", String(128), nullable=False, default="spaces"),
+    Column("config", JSON, nullable=False, default=dict),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+mind_map_nodes = Table(
+    "mind_map_nodes",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("whiteboard_id", String(64), ForeignKey("whiteboards.id"), nullable=False),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("parent_node_id", String(64), nullable=True),
+    Column("label", String(255), nullable=False),
+    Column("kind", String(64), nullable=False, default="module"),
+    Column("linked_type", String(64), nullable=True),
+    Column("linked_id", String(128), nullable=True),
+    Column("sort_order", Integer, nullable=False, default=0),
+    Column("metadata_json", JSON, nullable=False, default=dict),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
 goals = Table(
@@ -733,10 +818,55 @@ class DecisionPayload(BaseModel):
     status: str = "Accepted"
 
 
+
+class WhiteboardPayload(BaseModel):
+    name: str = "New Whiteboard"
+    icon: str = "✎"
+    favorite: bool = False
+    objects: List[Dict[str, Any]] = Field(default_factory=list)
+    edges: List[Dict[str, Any]] = Field(default_factory=list)
+    canvas_cards: List[Dict[str, Any]] = Field(default_factory=list)
+    mind_map: Dict[str, Any] = Field(default_factory=dict)
+
+
+class WhiteboardObjectPayload(BaseModel):
+    object_type: str = "sticky"
+    text: str = "New idea"
+    color: str = "yellow"
+    x: int = 80
+    y: int = 80
+    w: int = 180
+    h: int = 120
+    task_id: Optional[str] = None
+    doc_id: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CanvasCardPayload(BaseModel):
+    title: str = "Live Work Card"
+    kind: str = "Task Rollup"
+    metric: str = ""
+    x: int = 80
+    y: int = 80
+    linked_type: str = "dashboard"
+    linked_id: str = "d1"
+    config: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MindMapNodePayload(BaseModel):
+    parent_node_id: Optional[str] = None
+    label: str = "New Node"
+    kind: str = "feature"
+    linked_type: Optional[str] = None
+    linked_id: Optional[str] = None
+    sort_order: int = 0
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 app = FastAPI(
     title="Thing Planner WorkOS API",
     version=APP_VERSION,
-    description="v0.8 Docs, Wiki, Knowledge, Decisions, linked tasks, AI document summaries, Gantt, planner, reporting, forms, automations, normalized data, and demo auth for Thing Planner WorkOS.",
+    description="v0.9 Whiteboards, Canvas, Mind Maps, visual collaboration, Docs, Gantt, planner, reporting, forms, automations, normalized data, and demo auth for Thing Planner WorkOS.",
 )
 
 app.add_middleware(
@@ -756,6 +886,7 @@ def startup() -> None:
     ensure_default_planner_data()
     ensure_default_gantt_data()
     ensure_default_docs_data()
+    ensure_default_whiteboard_data()
 
 
 def get_current_user(authorization: Optional[str] = Header(default=None)) -> Optional[Dict[str, Any]]:
@@ -775,7 +906,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> Opt
 def load_seed_state() -> Dict[str, Any]:
     with SEED_PATH.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    data["version"] = "0.8.0"
+    data["version"] = "0.9.0"
     return data
 
 
@@ -1301,9 +1432,11 @@ def serialize_state() -> Dict[str, Any]:
         "module": "home",
         "view": "list",
         "selectedProject": "p1",
+        "selectedWhiteboard": "wb1",
+        "visualTab": "whiteboard",
         "helper": True,
         "aiPromo": True,
-        "version": "0.8.0",
+        "version": "0.9.0",
         "workspace": {"name": workspace["name"], "initials": workspace["initials"]},
         "members": [
             {"id": r.id, "name": r.display_name, "initials": r.initials, "avatar": r.avatar, "role": r.role}
@@ -1371,8 +1504,61 @@ def serialize_state() -> Dict[str, Any]:
         "taskDependencies": [serialize_dependency(r) for r in dependency_rows],
         "ganttBaselines": [{"id": r.id, "projectId": r.list_id, "name": r.name, "taskSnapshots": r.task_snapshots or [], "createdAt": r.created_at.isoformat()} for r in baseline_rows],
         "ganttRiskAlerts": [{"id": r.id, "projectId": r.list_id, "taskId": r.task_id, "level": r.level, "title": r.title, "recommendation": r.recommendation, "metadata": r.metadata_json or {}, "createdAt": r.created_at.isoformat()} for r in gantt_alert_rows],
+        "whiteboards": serialize_whiteboards(),
     }
 
+
+
+def sync_whiteboards_from_state(conn, boards: List[Dict[str, Any]], actor: Optional[str] = None) -> None:
+    if boards is None:
+        return
+    conn.execute(delete(mind_map_nodes).where(mind_map_nodes.c.workspace_id == DEFAULT_WORKSPACE_ID))
+    conn.execute(delete(canvas_cards).where(canvas_cards.c.workspace_id == DEFAULT_WORKSPACE_ID))
+    conn.execute(delete(whiteboard_edges).where(whiteboard_edges.c.workspace_id == DEFAULT_WORKSPACE_ID))
+    conn.execute(delete(whiteboard_objects).where(whiteboard_objects.c.workspace_id == DEFAULT_WORKSPACE_ID))
+    conn.execute(delete(whiteboards).where(whiteboards.c.workspace_id == DEFAULT_WORKSPACE_ID))
+    now = utc_now()
+    for board in boards:
+        bid = board.get("id") or make_id("wb")
+        conn.execute(whiteboards.insert().values(
+            id=bid, workspace_id=DEFAULT_WORKSPACE_ID, name=board.get("name", "Whiteboard"), icon=board.get("icon", "✎"),
+            owner=board.get("owner", "Adrian Francis"), favorite=bool(board.get("favorite", False)), updated=board.get("updated", "Today"),
+            metadata_json=board.get("metadata", {}), created_at=now, updated_at=now,
+        ))
+        for obj in board.get("objects", []):
+            conn.execute(whiteboard_objects.insert().values(
+                id=obj.get("id") or make_id("wbo"), whiteboard_id=bid, workspace_id=DEFAULT_WORKSPACE_ID,
+                object_type=obj.get("type", obj.get("objectType", "sticky")), text=obj.get("text", ""), color=obj.get("color", "yellow"),
+                x=int(obj.get("x", 80)), y=int(obj.get("y", 80)), w=int(obj.get("w", 180)), h=int(obj.get("h", 120)),
+                task_id=obj.get("taskId"), doc_id=obj.get("docId"), metadata_json=obj.get("metadata", {}), created_at=now, updated_at=now,
+            ))
+        for edge in board.get("edges", []):
+            conn.execute(whiteboard_edges.insert().values(
+                id=edge.get("id") or make_id("edge"), whiteboard_id=bid, workspace_id=DEFAULT_WORKSPACE_ID,
+                from_object_id=edge.get("from"), to_object_id=edge.get("to"), label=edge.get("label", "relates"),
+                metadata_json=edge.get("metadata", {}), created_at=now,
+            ))
+        for card in board.get("canvasCards", []):
+            conn.execute(canvas_cards.insert().values(
+                id=card.get("id") or make_id("cc"), whiteboard_id=bid, workspace_id=DEFAULT_WORKSPACE_ID,
+                title=card.get("title", "Canvas Card"), kind=card.get("kind", "Card"), metric=card.get("metric", ""),
+                x=int(card.get("x", 80)), y=int(card.get("y", 80)), linked_type=card.get("linkedType", "module"), linked_id=card.get("linkedId", "spaces"),
+                config=card.get("config", {}), created_at=now, updated_at=now,
+            ))
+        mm = board.get("mindMap", {})
+        root = mm.get("root", {"id": f"mm_{bid}_root", "label": board.get("name", "Whiteboard"), "kind": "root"})
+        conn.execute(mind_map_nodes.insert().values(
+            id=root.get("id", f"mm_{bid}_root"), whiteboard_id=bid, workspace_id=DEFAULT_WORKSPACE_ID, parent_node_id=None,
+            label=root.get("label", board.get("name", "Whiteboard")), kind=root.get("kind", "root"), linked_type=None, linked_id=None,
+            sort_order=0, metadata_json=root.get("metadata", {}), created_at=now, updated_at=now,
+        ))
+        for idx, node in enumerate(mm.get("nodes", []), start=1):
+            conn.execute(mind_map_nodes.insert().values(
+                id=node.get("id") or make_id("mm"), whiteboard_id=bid, workspace_id=DEFAULT_WORKSPACE_ID, parent_node_id=node.get("parent"),
+                label=node.get("label", "Node"), kind=node.get("kind", "feature"), linked_type=node.get("linkedType"), linked_id=node.get("linkedId"),
+                sort_order=idx, metadata_json=node.get("metadata", {}), created_at=now, updated_at=now,
+            ))
+    log_event(conn, "whiteboards.synced", "workspace", DEFAULT_WORKSPACE_ID, "Synchronized frontend whiteboard state", actor, {"board_count": len(boards)})
 
 def apply_state_to_normalized_tables(state: Dict[str, Any], actor: Optional[str] = None) -> None:
     with engine.begin() as conn:
@@ -1390,6 +1576,8 @@ def apply_state_to_normalized_tables(state: Dict[str, Any], actor: Optional[str]
                     text=comment.get("text", ""),
                     created_at=parse_or_now(comment.get("created_at")),
                 ))
+        if "whiteboards" in state:
+            sync_whiteboards_from_state(conn, state.get("whiteboards", []), actor=actor)
         if "notifications" in state:
             conn.execute(delete(notifications).where(notifications.c.workspace_id == DEFAULT_WORKSPACE_ID))
             for n in state.get("notifications", []):
@@ -1400,6 +1588,150 @@ def apply_state_to_normalized_tables(state: Dict[str, Any], actor: Optional[str]
                 ))
         log_event(conn, "state.synced", "workspace", DEFAULT_WORKSPACE_ID, "Synchronized frontend state into normalized tables", actor, {"task_count": len(state.get("tasks", []))})
 
+
+
+# ---- v0.9 Visual Collaboration helpers ----
+def default_whiteboard_payload() -> Dict[str, Any]:
+    return {
+        "id": "wb1", "name": "Launch Planning Board", "icon": "✎", "owner": "Adrian Francis", "favorite": True, "updated": "Today",
+        "objects": [
+            {"id": "wbo1", "type": "sticky", "text": "Project idea\n\nAI turns this into a project plan.", "color": "yellow", "x": 72, "y": 86, "w": 180, "h": 126},
+            {"id": "wbo2", "type": "sticky", "text": "Dashboard card\n\nLive KPI with task drill-down.", "color": "blue", "x": 330, "y": 164, "w": 184, "h": 126, "taskId": "t4"},
+            {"id": "wbo3", "type": "sticky", "text": "Form intake\n\nCentralize requests and trigger workflows.", "color": "pink", "x": 562, "y": 92, "w": 190, "h": 126, "taskId": "t5"},
+            {"id": "wbo4", "type": "sticky", "text": "Automation\n\nEscalate blocked work automatically.", "color": "green", "x": 790, "y": 236, "w": 190, "h": 126},
+            {"id": "wbo5", "type": "task", "text": "Campaign dashboard wireframe", "color": "purple", "x": 314, "y": 356, "w": 248, "h": 96, "taskId": "t4"},
+            {"id": "wbo6", "type": "doc", "text": "Project Charter", "color": "white", "x": 90, "y": 310, "w": 220, "h": 92, "docId": "doc1"},
+        ],
+        "edges": [
+            {"id": "edge1", "from": "wbo1", "to": "wbo2", "label": "plan"},
+            {"id": "edge2", "from": "wbo2", "to": "wbo3", "label": "insight"},
+            {"id": "edge3", "from": "wbo3", "to": "wbo4", "label": "trigger"},
+            {"id": "edge4", "from": "wbo1", "to": "wbo6", "label": "document"},
+            {"id": "edge5", "from": "wbo2", "to": "wbo5", "label": "work item"},
+        ],
+        "canvasCards": [
+            {"id": "cc1", "title": "Execution Hub", "kind": "Project", "metric": "8 tasks", "x": 40, "y": 40, "linkedType": "list", "linkedId": "p1"},
+            {"id": "cc2", "title": "AI Risk Watch", "kind": "AI Card", "metric": "2 risks", "x": 322, "y": 46, "linkedType": "dashboard", "linkedId": "d1"},
+            {"id": "cc3", "title": "Intake Flow", "kind": "Form", "metric": "3 submissions", "x": 606, "y": 48, "linkedType": "form", "linkedId": "form1"},
+            {"id": "cc4", "title": "Knowledge Base", "kind": "Docs", "metric": "3 docs", "x": 178, "y": 250, "linkedType": "doc", "linkedId": "doc1"},
+            {"id": "cc5", "title": "Critical Path", "kind": "Gantt", "metric": "3 critical tasks", "x": 486, "y": 250, "linkedType": "gantt", "linkedId": "p1"},
+        ],
+        "mindMap": {
+            "root": {"id": "mm-root", "label": "Thing Planner WorkOS", "kind": "root"},
+            "nodes": [
+                {"id": "mm-tasks", "parent": "mm-root", "label": "Tasks & Projects", "kind": "module", "linkedType": "module", "linkedId": "spaces"},
+                {"id": "mm-reports", "parent": "mm-root", "label": "Reports & Dashboards", "kind": "module", "linkedType": "module", "linkedId": "dashboards"},
+                {"id": "mm-ai", "parent": "mm-root", "label": "AI Agents", "kind": "module", "linkedType": "module", "linkedId": "ai"},
+                {"id": "mm-forms", "parent": "mm-root", "label": "Forms + Intake", "kind": "module", "linkedType": "module", "linkedId": "forms"},
+                {"id": "mm-docs", "parent": "mm-root", "label": "Docs + Decisions", "kind": "module", "linkedType": "module", "linkedId": "docs"},
+                {"id": "mm-gantt", "parent": "mm-tasks", "label": "Critical Path", "kind": "feature", "linkedType": "view", "linkedId": "gantt"},
+                {"id": "mm-board", "parent": "mm-tasks", "label": "Kanban Board", "kind": "feature", "linkedType": "view", "linkedId": "board"},
+                {"id": "mm-ai-summary", "parent": "mm-ai", "label": "Status Reports", "kind": "feature", "linkedType": "action", "linkedId": "ai-summary"},
+                {"id": "mm-submissions", "parent": "mm-forms", "label": "Task Creation", "kind": "feature", "linkedType": "action", "linkedId": "form-task"},
+                {"id": "mm-decisions", "parent": "mm-docs", "label": "Decision Records", "kind": "feature", "linkedType": "action", "linkedId": "decisions"},
+            ]
+        },
+    }
+
+
+def ensure_default_whiteboard_data() -> None:
+    metadata.create_all(engine)
+    with engine.begin() as conn:
+        existing = conn.execute(select(func.count()).select_from(whiteboards).where(whiteboards.c.workspace_id == DEFAULT_WORKSPACE_ID)).scalar_one()
+        if existing:
+            return
+        seed = default_whiteboard_payload()
+        now = utc_now()
+        conn.execute(whiteboards.insert().values(
+            id=seed["id"], workspace_id=DEFAULT_WORKSPACE_ID, name=seed["name"], icon=seed["icon"], owner=seed["owner"],
+            favorite=seed["favorite"], updated=seed["updated"], metadata_json={}, created_at=now, updated_at=now,
+        ))
+        for obj in seed["objects"]:
+            conn.execute(whiteboard_objects.insert().values(
+                id=obj["id"], whiteboard_id=seed["id"], workspace_id=DEFAULT_WORKSPACE_ID, object_type=obj.get("type", "sticky"), text=obj.get("text", ""),
+                color=obj.get("color", "yellow"), x=int(obj.get("x", 80)), y=int(obj.get("y", 80)), w=int(obj.get("w", 180)), h=int(obj.get("h", 120)),
+                task_id=obj.get("taskId"), doc_id=obj.get("docId"), metadata_json=obj.get("metadata", {}), created_at=now, updated_at=now,
+            ))
+        for edge in seed["edges"]:
+            conn.execute(whiteboard_edges.insert().values(
+                id=edge["id"], whiteboard_id=seed["id"], workspace_id=DEFAULT_WORKSPACE_ID, from_object_id=edge["from"], to_object_id=edge["to"],
+                label=edge.get("label", "relates"), metadata_json={}, created_at=now,
+            ))
+        for card in seed["canvasCards"]:
+            conn.execute(canvas_cards.insert().values(
+                id=card["id"], whiteboard_id=seed["id"], workspace_id=DEFAULT_WORKSPACE_ID, title=card["title"], kind=card.get("kind", "Card"),
+                metric=card.get("metric", ""), x=int(card.get("x", 80)), y=int(card.get("y", 80)), linked_type=card.get("linkedType", "module"),
+                linked_id=card.get("linkedId", "spaces"), config=card.get("config", {}), created_at=now, updated_at=now,
+            ))
+        root = seed["mindMap"]["root"]
+        conn.execute(mind_map_nodes.insert().values(
+            id=root["id"], whiteboard_id=seed["id"], workspace_id=DEFAULT_WORKSPACE_ID, parent_node_id=None, label=root["label"], kind=root.get("kind", "root"),
+            linked_type=None, linked_id=None, sort_order=0, metadata_json={}, created_at=now, updated_at=now,
+        ))
+        for idx, node in enumerate(seed["mindMap"].get("nodes", []), start=1):
+            conn.execute(mind_map_nodes.insert().values(
+                id=node["id"], whiteboard_id=seed["id"], workspace_id=DEFAULT_WORKSPACE_ID, parent_node_id=node.get("parent"), label=node["label"],
+                kind=node.get("kind", "module"), linked_type=node.get("linkedType"), linked_id=node.get("linkedId"), sort_order=idx,
+                metadata_json={}, created_at=now, updated_at=now,
+            ))
+        record_automation_run(conn, "auto_visual_seed", "Visual workspace seeded", "whiteboard", seed["id"], "Seeded v0.9 visual collaboration board", {"objects": len(seed["objects"]), "cards": len(seed["canvasCards"])})
+        log_event(conn, "whiteboard.seeded", "whiteboard", seed["id"], "Seeded visual collaboration workspace", DEFAULT_OWNER_ID, {})
+
+
+def serialize_whiteboards(conn=None) -> List[Dict[str, Any]]:
+    should_close = conn is None
+    context = engine.begin() if should_close else None
+    if should_close:
+        conn = context.__enter__()
+    try:
+        wb_rows = conn.execute(select(whiteboards).where(whiteboards.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(whiteboards.c.created_at)).all()
+        obj_rows = conn.execute(select(whiteboard_objects).where(whiteboard_objects.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+        edge_rows = conn.execute(select(whiteboard_edges).where(whiteboard_edges.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+        card_rows = conn.execute(select(canvas_cards).where(canvas_cards.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+        node_rows = conn.execute(select(mind_map_nodes).where(mind_map_nodes.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(mind_map_nodes.c.sort_order)).all()
+        objects_by_wb: Dict[str, List[Any]] = {}
+        edges_by_wb: Dict[str, List[Any]] = {}
+        cards_by_wb: Dict[str, List[Any]] = {}
+        nodes_by_wb: Dict[str, List[Any]] = {}
+        for row in obj_rows: objects_by_wb.setdefault(row.whiteboard_id, []).append(row)
+        for row in edge_rows: edges_by_wb.setdefault(row.whiteboard_id, []).append(row)
+        for row in card_rows: cards_by_wb.setdefault(row.whiteboard_id, []).append(row)
+        for row in node_rows: nodes_by_wb.setdefault(row.whiteboard_id, []).append(row)
+        boards: List[Dict[str, Any]] = []
+        for wb in wb_rows:
+            nodes = nodes_by_wb.get(wb.id, [])
+            root = next((n for n in nodes if not n.parent_node_id), None)
+            boards.append({
+                "id": wb.id, "name": wb.name, "icon": wb.icon, "owner": wb.owner, "favorite": wb.favorite, "updated": wb.updated,
+                "objects": [{"id": o.id, "type": o.object_type, "text": o.text, "color": o.color, "x": o.x, "y": o.y, "w": o.w, "h": o.h, "taskId": o.task_id, "docId": o.doc_id, "metadata": o.metadata_json or {}} for o in objects_by_wb.get(wb.id, [])],
+                "edges": [{"id": e.id, "from": e.from_object_id, "to": e.to_object_id, "label": e.label, "metadata": e.metadata_json or {}} for e in edges_by_wb.get(wb.id, [])],
+                "canvasCards": [{"id": c.id, "title": c.title, "kind": c.kind, "metric": c.metric, "x": c.x, "y": c.y, "linkedType": c.linked_type, "linkedId": c.linked_id, "config": c.config or {}} for c in cards_by_wb.get(wb.id, [])],
+                "mindMap": {
+                    "root": {"id": root.id if root else "mm-root", "label": root.label if root else wb.name, "kind": root.kind if root else "root"},
+                    "nodes": [{"id": n.id, "parent": n.parent_node_id, "label": n.label, "kind": n.kind, "linkedType": n.linked_type, "linkedId": n.linked_id, "metadata": n.metadata_json or {}} for n in nodes if n.parent_node_id],
+                },
+            })
+        return boards
+    finally:
+        if should_close and context is not None:
+            context.__exit__(None, None, None)
+
+
+def whiteboard_ai_summary(board: Dict[str, Any]) -> Dict[str, Any]:
+    objects = board.get("objects", [])
+    edges = board.get("edges", [])
+    cards = board.get("canvasCards", [])
+    linked_tasks = [o for o in objects if o.get("taskId")]
+    return {
+        "summary": f"{board.get('name', 'Whiteboard')} has {len(objects)} objects, {len(edges)} mapped relationships, {len(cards)} live canvas cards, and {len(linked_tasks)} linked tasks. Convert unlinked ideas into tasks and keep canvas cards tied to dashboards, forms, Gantt, and Docs.",
+        "actions": [
+            "Convert unlinked sticky notes into tasks or decision records.",
+            "Use Canvas cards as a live executive planning board.",
+            "Review mind-map branches for missing owners, due dates, or source docs.",
+        ],
+        "risks": ["Unlinked visual ideas can become stale if not converted into source work."],
+        "sourceObjectIds": [o.get("id") for o in objects[:5]],
+    }
 
 @app.get("/api/health")
 def health() -> Dict[str, Any]:
@@ -1425,6 +1757,11 @@ def health() -> Dict[str, Any]:
                 "doc_versions": conn.execute(select(func.count()).select_from(doc_versions)).scalar_one(),
                 "doc_task_links": conn.execute(select(func.count()).select_from(doc_task_links)).scalar_one(),
                 "doc_decisions": conn.execute(select(func.count()).select_from(doc_decisions)).scalar_one(),
+                "whiteboards": conn.execute(select(func.count()).select_from(whiteboards)).scalar_one(),
+                "whiteboard_objects": conn.execute(select(func.count()).select_from(whiteboard_objects)).scalar_one(),
+                "whiteboard_edges": conn.execute(select(func.count()).select_from(whiteboard_edges)).scalar_one(),
+                "canvas_cards": conn.execute(select(func.count()).select_from(canvas_cards)).scalar_one(),
+                "mind_map_nodes": conn.execute(select(func.count()).select_from(mind_map_nodes)).scalar_one(),
             }
         db_ok = True
     except SQLAlchemyError:
@@ -1434,7 +1771,7 @@ def health() -> Dict[str, Any]:
         "status": "ok" if db_ok else "degraded",
         "version": APP_VERSION,
         "database": engine.dialect.name,
-        "schema": "docs-knowledge-v0.8",
+        "schema": "visual-collaboration-v0.9",
         "auth": "enabled",
         "workspace_id": DEFAULT_WORKSPACE_ID,
         "tables": table_counts,
@@ -1479,8 +1816,9 @@ def api_schema() -> Dict[str, Any]:
             "docs", "goals", "automations", "automation_runs", "activity_logs", "sessions", "report_cards", "form_submissions",
             "calendar_events", "planner_blocks", "planner_preferences", "task_dependencies", "gantt_baselines", "gantt_risk_alerts",
             "doc_pages", "doc_versions", "doc_task_links", "doc_decisions",
+            "whiteboards", "whiteboard_objects", "whiteboard_edges", "canvas_cards", "mind_map_nodes",
         ],
-        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1-v0.8 frontend state shape. v0.8 adds Docs, wiki pages, decisions, linked task records, AI document summaries, and knowledge search on top of Gantt, planner, reporting, forms, automations, and auth.",
+        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1-v0.9 frontend state shape. v0.9 adds Whiteboards, Canvas, Mind Maps, visual objects, edges, live canvas cards, and AI visual summaries on top of Docs, Gantt, planner, reporting, forms, automations, and auth.",
     }
 
 
@@ -2196,7 +2534,7 @@ def compute_report_dataset(filters: Optional[Dict[str, Any]] = None) -> Dict[str
     completion = round((len(done) / len(filtered)) * 100) if filtered else 0
     utilization = round((tracked_hours / estimate_hours) * 100) if estimate_hours else 0
     return {
-        "schema": "docs-knowledge-v0.8",
+        "schema": "visual-collaboration-v0.9",
         "generated_at": utc_now().isoformat(),
         "filters": filters or {},
         "summary": {
@@ -2631,6 +2969,7 @@ def api_create_gantt_baseline(payload: GanttBaselinePayload, current_user: Optio
 @app.get("/api/docs")
 def api_docs() -> Dict[str, Any]:
     ensure_default_docs_data()
+    ensure_default_whiteboard_data()
     with engine.begin() as conn:
         rows = conn.execute(select(docs).where(docs.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(docs.c.title)).all()
         bundles = [serialize_doc_bundle(conn, r.id) for r in rows]
@@ -2650,6 +2989,7 @@ def api_docs() -> Dict[str, Any]:
 @app.get("/api/docs/{doc_id}")
 def api_get_doc(doc_id: str) -> Dict[str, Any]:
     ensure_default_docs_data()
+    ensure_default_whiteboard_data()
     with engine.begin() as conn:
         return {"ok": True, "doc": serialize_doc_bundle(conn, doc_id)}
 
@@ -2761,6 +3101,7 @@ def api_add_decision(doc_id: str, payload: DecisionPayload, current_user: Option
 @app.post("/api/docs/{doc_id}/ai-summary")
 def api_doc_ai_summary(doc_id: str) -> Dict[str, Any]:
     ensure_default_docs_data()
+    ensure_default_whiteboard_data()
     with engine.begin() as conn:
         bundle = serialize_doc_bundle(conn, doc_id)
         summary = bundle.get("aiSummary", {})
@@ -2771,6 +3112,7 @@ def api_doc_ai_summary(doc_id: str) -> Dict[str, Any]:
 @app.get("/api/knowledge/search")
 def api_knowledge_search(q: str = "", kind: str = "all") -> Dict[str, Any]:
     ensure_default_docs_data()
+    ensure_default_whiteboard_data()
     query = q.strip().lower()
     results = []
     with engine.begin() as conn:
@@ -2793,6 +3135,7 @@ def api_knowledge_search(q: str = "", kind: str = "all") -> Dict[str, Any]:
 @app.get("/api/knowledge/hub")
 def api_knowledge_hub() -> Dict[str, Any]:
     ensure_default_docs_data()
+    ensure_default_whiteboard_data()
     docs_payload = api_docs()
     return {
         "ok": True,
@@ -2807,6 +3150,101 @@ def api_knowledge_hub() -> Dict[str, Any]:
     }
 
 
+
+@app.get("/api/whiteboards")
+def api_whiteboards() -> Dict[str, Any]:
+    ensure_default_whiteboard_data()
+    boards = serialize_whiteboards()
+    return {"ok": True, "whiteboards": boards, "stats": {"boards": len(boards), "objects": sum(len(b.get("objects", [])) for b in boards), "edges": sum(len(b.get("edges", [])) for b in boards), "canvasCards": sum(len(b.get("canvasCards", [])) for b in boards), "mindMapNodes": sum(len(b.get("mindMap", {}).get("nodes", [])) + 1 for b in boards)}}
+
+
+@app.get("/api/whiteboards/{whiteboard_id}")
+def api_whiteboard_detail(whiteboard_id: str) -> Dict[str, Any]:
+    ensure_default_whiteboard_data()
+    boards = serialize_whiteboards()
+    board = next((b for b in boards if b["id"] == whiteboard_id), None)
+    if not board:
+        raise HTTPException(status_code=404, detail="Whiteboard not found")
+    return {"ok": True, "whiteboard": board, "summary": whiteboard_ai_summary(board)}
+
+
+@app.post("/api/whiteboards")
+def api_create_whiteboard(payload: WhiteboardPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    board = {"id": make_id("wb"), "name": payload.name, "icon": payload.icon, "owner": current_user.get("display_name", "Adrian Francis") if current_user else "Adrian Francis", "favorite": payload.favorite, "updated": "Now", "objects": payload.objects, "edges": payload.edges, "canvasCards": payload.canvas_cards, "mindMap": payload.mind_map or {"root": {"id": "root", "label": payload.name, "kind": "root"}, "nodes": []}}
+    with engine.begin() as conn:
+        existing = serialize_whiteboards(conn)
+        sync_whiteboards_from_state(conn, [board] + existing, actor=actor)
+        record_automation_run(conn, "auto_visual_board_created", "Whiteboard created", "whiteboard", board["id"], f"Created visual board: {payload.name}", {})
+    return {"ok": True, "whiteboard": board, "whiteboards": serialize_whiteboards(), "state": serialize_state()}
+
+
+@app.post("/api/whiteboards/{whiteboard_id}/objects")
+def api_add_whiteboard_object(whiteboard_id: str, payload: WhiteboardObjectPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        board = conn.execute(select(whiteboards).where(whiteboards.c.id == whiteboard_id)).first()
+        if not board:
+            raise HTTPException(status_code=404, detail="Whiteboard not found")
+        oid = make_id("wbo")
+        conn.execute(whiteboard_objects.insert().values(
+            id=oid, whiteboard_id=whiteboard_id, workspace_id=DEFAULT_WORKSPACE_ID, object_type=payload.object_type, text=payload.text, color=payload.color,
+            x=payload.x, y=payload.y, w=payload.w, h=payload.h, task_id=payload.task_id, doc_id=payload.doc_id, metadata_json=payload.metadata,
+            created_at=utc_now(), updated_at=utc_now(),
+        ))
+        conn.execute(whiteboards.update().where(whiteboards.c.id == whiteboard_id).values(updated="Now", updated_at=utc_now()))
+        log_event(conn, "whiteboard.object.created", "whiteboard_object", oid, f"Added {payload.object_type} to whiteboard", actor, {"whiteboard_id": whiteboard_id})
+    return {"ok": True, "whiteboards": serialize_whiteboards(), "state": serialize_state()}
+
+
+@app.post("/api/whiteboards/{whiteboard_id}/canvas-cards")
+def api_add_canvas_card(whiteboard_id: str, payload: CanvasCardPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        board = conn.execute(select(whiteboards).where(whiteboards.c.id == whiteboard_id)).first()
+        if not board:
+            raise HTTPException(status_code=404, detail="Whiteboard not found")
+        cid = make_id("cc")
+        conn.execute(canvas_cards.insert().values(
+            id=cid, whiteboard_id=whiteboard_id, workspace_id=DEFAULT_WORKSPACE_ID, title=payload.title, kind=payload.kind, metric=payload.metric,
+            x=payload.x, y=payload.y, linked_type=payload.linked_type, linked_id=payload.linked_id, config=payload.config,
+            created_at=utc_now(), updated_at=utc_now(),
+        ))
+        conn.execute(whiteboards.update().where(whiteboards.c.id == whiteboard_id).values(updated="Now", updated_at=utc_now()))
+        log_event(conn, "canvas.card.created", "canvas_card", cid, f"Added canvas card: {payload.title}", actor, {"whiteboard_id": whiteboard_id})
+    return {"ok": True, "whiteboards": serialize_whiteboards(), "state": serialize_state()}
+
+
+@app.post("/api/whiteboards/{whiteboard_id}/mind-map-nodes")
+def api_add_mind_map_node(whiteboard_id: str, payload: MindMapNodePayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        board = conn.execute(select(whiteboards).where(whiteboards.c.id == whiteboard_id)).first()
+        if not board:
+            raise HTTPException(status_code=404, detail="Whiteboard not found")
+        nid = make_id("mm")
+        conn.execute(mind_map_nodes.insert().values(
+            id=nid, whiteboard_id=whiteboard_id, workspace_id=DEFAULT_WORKSPACE_ID, parent_node_id=payload.parent_node_id,
+            label=payload.label, kind=payload.kind, linked_type=payload.linked_type, linked_id=payload.linked_id, sort_order=payload.sort_order,
+            metadata_json=payload.metadata, created_at=utc_now(), updated_at=utc_now(),
+        ))
+        conn.execute(whiteboards.update().where(whiteboards.c.id == whiteboard_id).values(updated="Now", updated_at=utc_now()))
+        log_event(conn, "mind_map.node.created", "mind_map_node", nid, f"Added mind map node: {payload.label}", actor, {"whiteboard_id": whiteboard_id})
+    return {"ok": True, "whiteboards": serialize_whiteboards(), "state": serialize_state()}
+
+
+@app.post("/api/whiteboards/{whiteboard_id}/ai-summary")
+def api_whiteboard_ai_summary(whiteboard_id: str) -> Dict[str, Any]:
+    ensure_default_whiteboard_data()
+    boards = serialize_whiteboards()
+    board = next((b for b in boards if b["id"] == whiteboard_id), None)
+    if not board:
+        raise HTTPException(status_code=404, detail="Whiteboard not found")
+    summary = whiteboard_ai_summary(board)
+    with engine.begin() as conn:
+        record_automation_run(conn, "auto_visual_ai_summary", "Whiteboard AI summary", "whiteboard", whiteboard_id, f"Generated visual summary for {board.get('name')}", {"objects": len(board.get("objects", [])), "cards": len(board.get("canvasCards", []))})
+    return {"ok": True, "summary": summary, "whiteboard": board, "whiteboards": boards}
+
 @app.post("/api/ai/project-summary")
 def api_ai_summary() -> Dict[str, Any]:
     state = serialize_state()
@@ -2816,14 +3254,14 @@ def api_ai_summary() -> Dict[str, Any]:
     due_soon = [t for t in task_list if t.get("status") != "DONE"][:4]
     health = "At Risk" if blocked or len(critical_open) >= 2 else "On Track"
     return {
-        "summary": "The workspace now includes a v0.8 Docs + Knowledge engine with wiki pages, version history, decision records, task-linked knowledge, and AI document summaries on top of the existing Gantt, planner, reporting, forms, automations, and normalized data layer.",
+        "summary": "The workspace now includes a v0.9 Visual Collaboration engine with whiteboards, connected objects, canvas cards, mind maps, and AI visual summaries on top of Docs, Gantt, planner, reporting, forms, automations, and the normalized data layer.",
         "health": health,
         "blockers": [t.get("name") for t in blocked],
         "next_actions": [
             "Validate normalized table writes from List and Board views",
             "Move dashboard cards from derived frontend state to report endpoints",
             "Add real role enforcement for workspace members",
-            "Use v0.8 Docs AI summaries to brief decisions, SOP updates, and linked project risks",
+            "Use v0.9 visual summaries to convert ideas into tasks, decisions, canvas cards, and linked project risks",
         ],
         "sources": [t.get("name") for t in due_soon],
     }

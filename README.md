@@ -1,14 +1,45 @@
-# Thing Planner WorkOS v0.9.0
+# Thing Planner WorkOS v0.9.2
 
 **Thing Planner WorkOS** is an AI-native project management/work operating system prototype inspired by modern all-in-one productivity platforms. It includes a ClickUp-style workspace shell, tasks, boards, dashboards, reports, forms, automations, planner, Gantt, docs, wiki, decisions, AI assistant, whiteboards, canvas planning, mind maps, and a normalized API/data foundation.
 
-## v0.9.0 release theme
+## v0.9.2 release theme
 
-**Whiteboards + Canvas / Mind Map Engine**
+## Critical fix
 
-v0.9.0 turns the Whiteboards module from a static placeholder into an operational visual collaboration workspace. Ideas can be mapped as sticky notes, connected to tasks/docs, visualized as live canvas cards, expanded into a mind map, and summarized by AI into action items.
+- Fixes PostgreSQL startup failure: `automation_runs.automation_id` referenced `auto_visual_seed` before that automation existed.
+- `record_automation_run()` now guarantees missing system/visual automations are created before recording run history.
+- This should clear the browser top-bar state from `API offline / local mode` and `Demo auth pending` once Docker services are running.
 
-## What changed in v0.9.0
+
+**UI Cleanup + Connected Functional Shell**
+
+v0.9.2 is an API startup hotfix release. It keeps the v0.9.1 cleaned-up UI and fixes the PostgreSQL foreign-key startup crash caused by visual-collaboration automation run seeding before the visual automation records existed.
+
+## What changed in v0.9.2
+
+## v0.9.2 API startup hotfix
+
+- Global rail now shows exactly the top 9 primary modules:
+  - Home
+  - Spaces
+  - Planner
+  - AI
+  - Teams
+  - Docs
+  - Dashboard
+  - Whiteboard
+  - Forms
+- Removed distracting promo banner and feedback popups from the default workspace.
+- Removed lower Invite/Upgrade rail buttons from the primary navigation.
+- Reworked the top bar status badges into compact connection pills.
+- Added API reconnect behavior with retries while Docker services start.
+- Added fallback API discovery for `/api`, `localhost:8099/api`, and `127.0.0.1:8099/api`.
+- Demo auth now auto-runs when the API is reachable and shows a signed-in state.
+- Quick Add Task no longer opens a browser prompt; it creates a task and opens the task drawer.
+- Gantt baseline capture no longer opens a prompt; it creates a timestamped baseline automatically.
+- Sidebar plus buttons now perform useful actions instead of placeholder popups where possible.
+
+## v0.9.0 visual collaboration changes retained
 
 - New normalized visual collaboration tables:
   - `whiteboards`
@@ -96,8 +127,8 @@ The frontend auto-runs demo auth when the API is available.
 
 ```powershell
 cd C:\docker
-Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.9.0.zip" "C:\docker\thing-planner-workos-v0.9.0"
-cd C:\docker\thing-planner-workos-v0.9.0\thing-planner-workos-v0.9.0
+Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.9.2.zip" "C:\docker\thing-planner-workos-v0.9.2"
+cd C:\docker\thing-planner-workos-v0.9.2\thing-planner-workos-v0.9.2
 docker compose up --build -d
 ```
 
@@ -133,11 +164,11 @@ Use your clean repo folder:
 cd C:\docker\thing-planner-workos-git
 ```
 
-Copy v0.9.0 into the repo:
+Copy v0.9.2 into the repo:
 
 ```powershell
 robocopy `
-  "C:\docker\thing-planner-workos-v0.9.0\thing-planner-workos-v0.9.0" `
+  "C:\docker\thing-planner-workos-v0.9.2\thing-planner-workos-v0.9.2" `
   "C:\docker\thing-planner-workos-git" `
   /MIR `
   /XD .git .venv __pycache__ `
@@ -149,11 +180,11 @@ Commit and tag:
 ```powershell
 git status
 git add .
-git commit -m "Release Thing Planner WorkOS v0.9.0"
+git commit -m "Release Thing Planner WorkOS v0.9.2 API startup hotfix"
 git push origin main
 
-git tag -f v0.9.0
-git push origin v0.9.0 --force
+git tag -f v0.9.2
+git push origin v0.9.2 --force
 ```
 
 ## Recommended next build

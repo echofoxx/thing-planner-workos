@@ -34,7 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 
-APP_VERSION = "v0.9.0"
+APP_VERSION = "v0.9.2"
 DEFAULT_WORKSPACE_ID = "w1"
 DEFAULT_OWNER_ID = "adrian"
 SEED_PATH = Path(__file__).with_name("seed_state.json")
@@ -866,7 +866,7 @@ class MindMapNodePayload(BaseModel):
 app = FastAPI(
     title="Thing Planner WorkOS API",
     version=APP_VERSION,
-    description="v0.9 Whiteboards, Canvas, Mind Maps, visual collaboration, Docs, Gantt, planner, reporting, forms, automations, normalized data, and demo auth for Thing Planner WorkOS.",
+    description="v0.9.2 API startup hotfix + UI Cleanup + connected functional shell for Thing Planner WorkOS.",
 )
 
 app.add_middleware(
@@ -1984,9 +1984,31 @@ def analyze_intake(fields: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def record_automation_run(conn, automation_id: Optional[str], trigger: str, source_type: str, source_id: str, summary: str, details: Optional[dict] = None) -> None:
+    """Record an automation/system run without crashing startup if seed data references a new automation id.
+
+    v0.9.1 introduced visual-collaboration automation run history before the related
+    automation definitions were seeded. PostgreSQL correctly enforced the FK from
+    automation_runs.automation_id -> automations.id, which caused API startup to fail.
+    This helper now guarantees the referenced automation exists before writing the run.
+    """
+    safe_automation_id = automation_id
+    if automation_id:
+        existing = conn.execute(select(automations.c.id).where(automations.c.id == automation_id)).first()
+        if not existing:
+            display_name = automation_id.replace("auto_", "").replace("_", " ").title()
+            category = "Visual Collaboration" if automation_id.startswith("auto_visual") else "System"
+            conn.execute(automations.insert().values(
+                id=automation_id,
+                workspace_id=DEFAULT_WORKSPACE_ID,
+                name=display_name[:255],
+                category=category[:128],
+                enabled=True,
+                trigger=(trigger or "System event")[:255],
+                action=(summary or "Record automation activity")[:255],
+            ))
     conn.execute(automation_runs.insert().values(
         id=make_id("run"),
-        automation_id=automation_id,
+        automation_id=safe_automation_id,
         workspace_id=DEFAULT_WORKSPACE_ID,
         trigger=trigger,
         source_type=source_type,

@@ -727,3 +727,59 @@ button { cursor: pointer; }
 .mind-children { display:flex; flex-direction:column; gap:8px; margin:12px 0 0 28px; }
 .mind-node.child { font-size:12px; background:#fff; color:#494354; }
 @media (max-width: 980px) { .visual-shell { grid-template-columns:1fr; } .visual-kpis { grid-template-columns: repeat(2,1fr); } .visual-board-list { order:2; } }
+
+
+/* v0.9.1 UI cleanup + connected workspace polish */
+:root { --rail-w: 74px; --topbar-h: 44px; }
+.clean-topbar {
+  grid-template-columns: minmax(260px, 330px) minmax(360px, 1fr) minmax(430px, 560px);
+  padding: 0 10px;
+  gap: 12px;
+}
+.top-actions.compact { gap: 6px; overflow: hidden; }
+.connection-pill {
+  height: 28px;
+  max-width: 210px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: #fff;
+  color: #5f596b;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 700;
+}
+.connection-pill span {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: #f4a62a;
+  flex: 0 0 auto;
+}
+.connection-pill.online { background: #effdf5; color: #087f5b; border-color: #b7f7d0; }
+.connection-pill.online span { background: #10b981; }
+.connection-pill.offline { background: #fff8e7; color: #8a5a00; border-color: #f4d48b; }
+.rail.compact-rail { padding: 7px 5px; gap: 5px; }
+.rail.compact-rail .rail-item {
+  min-height: 56px;
+  font-size: 10.5px;
+  letter-spacing: -.1px;
+  border-radius: 12px;
+}
+.rail.compact-rail .rail-item .ico { font-size: 18px; }
+.promo-banner, .helper-card { display: none !important; }
+.canvas { background: linear-gradient(180deg, #fff, #fff 70%, #fbfbfd); }
+.context-sidebar { box-shadow: inset -1px 0 0 rgba(255,255,255,.5); }
+.side-bottom .customize { background: #fff; border: 1px solid var(--border); }
+.top-icon, .profile, .workspace-picker, .ai-pill, .connection-pill { border: 1px solid var(--border); }
+.top-icon { background: #fff; }
+@media (max-width: 1180px) {
+  .clean-topbar { grid-template-columns: 260px 1fr 260px; }
+  .connection-pill { max-width: 118px; }
+  .connection-pill:nth-child(2) { display:none; }
+}

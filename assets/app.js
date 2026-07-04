@@ -1,17 +1,17 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const STORAGE_KEY = 'thing-planner-workos-v090-state';
+const STORAGE_KEY = 'thing-planner-workos-v091-state';
 const API_BASE = window.THING_PLANNER_API_BASE || '/api';
 let apiOnline = false;
-let apiStatusText = 'Local demo mode';
+let apiStatusText = 'Connecting to API…';
 let hasBootstrappedApi = false;
 let suppressApiSync = false;
 let syncTimer = null;
 let lastSyncAt = null;
-let authToken = localStorage.getItem('thing-planner-workos-v090-token') || null;
+let authToken = localStorage.getItem('thing-planner-workos-v091-token') || null;
 let currentUser = null;
-let authStatusText = 'Demo auth pending';
+let authStatusText = 'Checking demo auth…';
 let lastReportDataset = null;
 let reportStatusText = 'Local intake automation engine';
 let lastGanttDataset = null;
@@ -23,9 +23,9 @@ const seedState = {
   selectedProject: 'p1',
   selectedDoc: 'doc1',
   knowledgeQuery: '',
-  helper: true,
-  aiPromo: true,
-  version: '0.9.0',
+  helper: false,
+  aiPromo: false,
+  version: '0.9.1',
   workspace: {
     name: "Adrian Francis's Workspace",
     initials: 'A',
@@ -157,7 +157,7 @@ function scheduleApiSync() {
 async function syncStateToApi() {
   if (!apiOnline) return;
   try {
-    await fetch(`${API_BASE}/state`, {
+    await fetch(`${window.THING_PLANNER_API_BASE || API_BASE}/state`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ state })
@@ -166,7 +166,7 @@ async function syncStateToApi() {
     apiStatusText = 'API synced';
   } catch (error) {
     apiOnline = false;
-    apiStatusText = 'API offline - local mode';
+    apiStatusText = 'Local mode';
     console.warn('API sync failed', error);
   }
 }
@@ -180,7 +180,7 @@ async function ensureDemoAuth() {
   try {
     let response;
     if (authToken) {
-      response = await fetch(`${API_BASE}/auth/me`, { headers: authHeaders(), cache: 'no-store' });
+      response = await fetch(`${window.THING_PLANNER_API_BASE || API_BASE}/auth/me`, { headers: authHeaders(), cache: 'no-store' });
       if (response.ok) {
         const me = await response.json();
         currentUser = me.user;
@@ -188,12 +188,12 @@ async function ensureDemoAuth() {
         return;
       }
     }
-    response = await fetch(`${API_BASE}/auth/demo-login`, { method: 'POST' });
+    response = await fetch(`${window.THING_PLANNER_API_BASE || API_BASE}/auth/demo-login`, { method: 'POST' });
     if (response.ok) {
       const data = await response.json();
       authToken = data.token;
       currentUser = data.user;
-      localStorage.setItem('thing-planner-workos-v090-token', authToken);
+      localStorage.setItem('thing-planner-workos-v091-token', authToken);
       authStatusText = `Demo auth: ${currentUser.display_name || currentUser.email}`;
     }
   } catch (error) {
@@ -203,33 +203,62 @@ async function ensureDemoAuth() {
 }
 
 async function hydrateFromApi() {
-  try {
-    const health = await fetch(`${API_BASE}/health`, { cache: 'no-store' });
-    if (!health.ok) throw new Error('Health check failed');
-    const healthJson = await health.json();
-    const response = await fetch(`${API_BASE}/state`, { cache: 'no-store' });
-    if (!response.ok) throw new Error('State fetch failed');
-    const data = await response.json();
-    apiOnline = true;
-    apiStatusText = `${healthJson.version || 'v0.9.0'} ${healthJson.schema || 'API'} connected`;
-    await ensureDemoAuth();
-    hasBootstrappedApi = true;
-    if (data && data.state) {
-      suppressApiSync = true;
-      state = { ...state, ...data.state };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  return bootstrapConnection(false);
+}
+
+function apiCandidates() {
+  const configured = window.THING_PLANNER_API_BASE || API_BASE;
+  const candidates = [configured, '/api'];
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
+    candidates.push('http://localhost:8099/api');
+    candidates.push('http://127.0.0.1:8099/api');
+  }
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+async function bootstrapConnection(showFeedback=false, attempt=0) {
+  const maxAttempts = 12;
+  const candidates = apiCandidates();
+  for (const base of candidates) {
+    try {
+      const health = await fetch(`${base}/health`, { cache: 'no-store' });
+      if (!health.ok) throw new Error('Health check failed');
+      const healthJson = await health.json();
+      window.THING_PLANNER_API_BASE = base;
+      apiOnline = true;
+      apiStatusText = `${healthJson.version || 'v0.9.1'} API connected`;
+      const stateResponse = await fetch(`${base}/state`, { cache: 'no-store' });
+      if (stateResponse.ok) {
+        const data = await stateResponse.json();
+        if (data && data.state) {
+          suppressApiSync = true;
+          state = { ...state, ...data.state, version: '0.9.1', helper: false, aiPromo: false };
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          suppressApiSync = false;
+        }
+      }
+      await ensureDemoAuth();
+      hasBootstrappedApi = true;
+      lastSyncAt = new Date();
+      if (showFeedback) toast('API connected and demo auth active');
       render();
       await refreshReportDataset(true);
-      suppressApiSync = false;
+      return true;
+    } catch (error) {
+      console.warn(`API candidate failed: ${base}`, error);
     }
-  } catch (error) {
-    apiOnline = false;
-    apiStatusText = 'API offline - local mode';
-    hasBootstrappedApi = true;
-    console.warn('Using local demo data because API is unavailable', error);
-    const badge = document.querySelector('.api-status-badge');
-    if (badge) { badge.textContent = apiStatusText; badge.classList.remove('online'); badge.classList.add('offline'); }
   }
+  apiOnline = false;
+  hasBootstrappedApi = true;
+  apiStatusText = attempt < maxAttempts ? 'Waiting for API…' : 'Local mode';
+  authStatusText = attempt < maxAttempts ? 'Checking demo auth…' : 'Demo auth unavailable';
+  if (attempt < maxAttempts) {
+    setTimeout(() => bootstrapConnection(false, attempt + 1), 900);
+  } else if (showFeedback) {
+    toast('API not reachable yet. Running local mode.');
+  }
+  render();
+  return false;
 }
 
 async function refreshReportDataset(silent=false) {
@@ -240,7 +269,7 @@ async function refreshReportDataset(silent=false) {
     return lastReportDataset;
   }
   try {
-    const response = await fetch(`${API_BASE}/reports/dashboard?dashboard_id=d1`, { headers: authHeaders(), cache: 'no-store' });
+    const response = await fetch(`${window.THING_PLANNER_API_BASE || API_BASE}/reports/dashboard?dashboard_id=d1`, { headers: authHeaders(), cache: 'no-store' });
     if (!response.ok) throw new Error('Report API failed');
     lastReportDataset = await response.json();
     reportStatusText = 'Server intake automation engine synced';
@@ -258,7 +287,7 @@ async function resetDemoData() {
   localStorage.removeItem(STORAGE_KEY);
   state = structuredClone(seedState);
   if (apiOnline) {
-    try { await fetch(`${API_BASE}/reset`, { method: 'POST' }); } catch (error) { console.warn('API reset failed', error); }
+    try { await fetch(`${window.THING_PLANNER_API_BASE || API_BASE}/reset`, { method: 'POST' }); } catch (error) { console.warn('API reset failed', error); }
   }
   toast('Demo data reset');
   render();
@@ -283,18 +312,12 @@ const railItems = [
   ['ai', '✽', 'AI'],
   ['teams', '♙', 'Teams'],
   ['docs', '▤', 'Docs'],
-  ['dashboards', '▥', 'Dashboa...'],
-  ['whiteboards', '✎', 'Whitebo...'],
+  ['dashboards', '▥', 'Dashboard'],
+  ['whiteboards', '✎', 'Whiteboard'],
   ['forms', '☑', 'Forms'],
-  ['clips', '▰', 'Clips'],
-  ['goals', '♕', 'Goals'],
-  ['more', '⋮', 'More'],
 ];
 
-const bottomRailItems = [
-  ['invite', '♙+', 'Invite'],
-  ['upgrade', '⬆', 'Upgrade'],
-];
+const bottomRailItems = [];
 
 function render() {
   saveState();
@@ -317,53 +340,41 @@ function render() {
 }
 
 function renderTopbar() {
+  const connected = apiOnline && currentUser;
+  const syncLabel = apiOnline ? 'API connected' : (hasBootstrappedApi ? 'Local mode' : 'Connecting…');
+  const authLabel = currentUser ? `Signed in: ${currentUser.display_name || currentUser.email}` : authStatusText;
   return `
-  <header class="topbar">
+  <header class="topbar clean-topbar">
     <div class="top-left-mini">
-      <button class="workspace-picker" onclick="toast('Workspace switcher opened')">
+      <button class="workspace-picker" onclick="setModule('home')" title="Open Home">
         <span class="workspace-avatar">${state.workspace.initials}</span>
         <span>${escapeHtml(state.workspace.name)}</span>
         <span>⌄</span>
       </button>
-      <button class="top-icon" onclick="setModule('planner')">▣</button>
-      <button class="top-icon" onclick="toast('No workspace warnings today')">⚠</button>
-      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.9 Whiteboards/canvas/mind maps/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
+      <button class="top-icon" onclick="setModule('planner')" title="Open Planner">▣</button>
     </div>
     <div class="global-search-wrap">
-      <label class="global-search"><span>⌕</span><input id="globalSearch" placeholder="Search ⌘K" onkeydown="if(event.key==='Enter') globalSearch(this.value)" /></label>
-      <button class="ai-pill" onclick="setModule('ai')"><span class="ai-flower">✽</span> AI Chats</button>
+      <label class="global-search"><span>⌕</span><input id="globalSearch" placeholder="Search tasks, docs, boards, dashboards…" onkeydown="if(event.key==='Enter') globalSearch(this.value)" /></label>
+      <button class="ai-pill" onclick="setModule('ai')"><span class="ai-flower">✽</span> Ask AI</button>
     </div>
-    <div class="top-actions">
-      <button class="top-icon" title="Sync">⟳</button>
-      <button class="top-icon" title="Portfolio">▤</button>
-      <button class="top-icon" title="Tasks">☷</button>
-      <button class="top-icon" title="Files">▱</button>
-      <button class="top-icon" title="Mic">♩</button>
-      <button class="top-icon" title="Timer">◷</button>
-      <button class="top-icon" title="Docs">▤</button>
-      <button class="top-icon" title="Settings" onclick="toast('Workspace settings placeholder')">⚙</button>
-      <button class="profile" onclick="toast('Profile menu placeholder')"><span class="avatar small">AF</span><span>⌄</span></button>
+    <div class="top-actions compact">
+      <button class="connection-pill ${apiOnline ? 'online' : 'offline'}" onclick="bootstrapConnection(true)" title="${escapeHtml(apiStatusText)}"><span></span>${syncLabel}</button>
+      <button class="connection-pill ${currentUser ? 'online' : 'offline'}" onclick="ensureDemoAuth().then(render)" title="${escapeHtml(authStatusText)}"><span></span>${authLabel}</button>
+      <button class="top-icon" onclick="setModule('docs')" title="Docs">▤</button>
+      <button class="top-icon" onclick="setModule('dashboards')" title="Dashboard">▥</button>
+      <button class="profile" onclick="setModule('teams')" title="Team profile"><span class="avatar small">AF</span></button>
     </div>
   </header>`;
 }
 
 function renderRail() {
-  return `<aside class="rail">
+  return `<aside class="rail compact-rail">
     ${railItems.map(([id, ico, label]) => `
-      <button class="rail-item ${state.module === id ? 'active' : ''}" onclick="setModule('${id}')"><span class="ico">${ico}</span><span>${label}</span></button>`).join('')}
-    <div class="rail-spacer"></div>
-    ${bottomRailItems.map(([id, ico, label]) => `
-      <button class="rail-item ${state.module === id ? 'active' : ''}" onclick="setModule('${id}')"><span class="ico">${ico}</span><span>${label}</span></button>`).join('')}
+      <button class="rail-item ${state.module === id ? 'active' : ''}" onclick="setModule('${id}')" title="${label}"><span class="ico">${ico}</span><span>${label}</span></button>`).join('')}
   </aside>`;
 }
 
 function renderPromoBanner() {
-  if (state.module === 'spaces') return `
-    <div class="promo-banner">Point AI at a messy project. Get a rescue plan in seconds. <a href="#" onclick="setModule('ai')">Reveal the plan →</a><button class="promo-close" onclick="dismissBanner()">×</button></div>
-  `;
-  if (['home','forms','dashboards','ai'].includes(state.module)) return `
-    <div class="promo-banner">Point AI at a messy project. Get a rescue plan in seconds. <a href="#" onclick="setModule('ai')">Reveal the plan →</a><button class="promo-close" onclick="dismissBanner()">×</button></div>
-  `;
   return '';
 }
 
@@ -403,12 +414,12 @@ function baseSidebar(title, createAction, body, bottom = true) {
   return `<aside class="context-sidebar">
     <div class="side-title-row"><div class="side-title">${title}</div>${createAction ? `<button class="icon-btn" onclick="${createAction}">＋</button>` : ''}</div>
     ${body}
-    ${bottom ? `<div class="side-bottom"><button class="customize" onclick="toast('Customize sidebar placeholder')">⇵ Customize Sidebar</button></div>` : ''}
+    ${bottom ? `<div class="side-bottom"><button class="customize" onclick="setModule('more')">Workspace settings</button></div>` : ''}
   </aside>`;
 }
 
 function renderHomeSidebar() {
-  return baseSidebar('Home', "toast('Quick create menu opened')", `
+  return baseSidebar('Home', "quickAddTask()", `
     <div class="side-nav">
       ${sideItem('Inbox', '▣', state.module==='home', () => '')}
       ${sideItem('Assigned Comments', '☟')}
@@ -424,7 +435,7 @@ function renderHomeSidebar() {
 }
 
 function renderSpacesSidebar() {
-  return baseSidebar('Spaces', "toast('New Space placeholder')", `
+  return baseSidebar('Spaces', "createProjectList()", `
     ${renderSpacesTree(true)}
     <div class="tree-line" onclick="toast('New Space placeholder')"><span>＋</span><span>New Space</span></div>
   `);
@@ -443,7 +454,7 @@ function renderFormsSidebar() {
 }
 
 function renderDashboardSidebar() {
-  return baseSidebar('Dashboards', "toast('Dashboard create menu opened')", `
+  return baseSidebar('Dashboard', "createDashboard()", `
     <div class="side-nav">
       <div class="side-item active"><span>▥</span><span class="label">All Dashboards</span></div>
       <div class="side-item"><span class="avatar small purple">A</span><span class="label">My Dashboards</span></div>
@@ -473,7 +484,7 @@ function renderAISidebar() {
 }
 
 function renderPlannerSidebar() {
-  return baseSidebar('Planner', "toast('Add event/task')", `
+  return baseSidebar('Planner', "addFocusBlock()", `
     <div class="side-nav">
       <div class="side-item active"><span>▣</span><span>Today</span></div>
       <div class="side-item"><span>☰</span><span>Upcoming</span></div>
@@ -489,7 +500,7 @@ function renderPlannerSidebar() {
 }
 
 function renderTeamsSidebar() {
-  return baseSidebar('Teams', "toast('Invite team member')", `
+  return baseSidebar('Teams', "addTeamMemberDemo()", `
     <div class="side-nav">
       <div class="side-item active"><span>👥</span><span>Teams Hub</span></div>
       <div class="side-item"><span>☷</span><span>Members</span></div>
@@ -531,7 +542,7 @@ function renderWhiteboardSidebar() {
 }
 
 function renderGoalsSidebar() {
-  return baseSidebar('Goals', "toast('New goal')", `
+  return baseSidebar('Goals', "createGoalDemo()", `
     <div class="side-nav">
       <div class="side-item active"><span>♕</span><span>All Goals</span></div>
       <div class="side-item"><span>🎯</span><span>OKRs</span></div>
@@ -552,7 +563,7 @@ function renderClipsSidebar() {
 }
 
 function renderMoreSidebar() {
-  return baseSidebar('More', "toast('More apps')", `
+  return baseSidebar('More', "bootstrapConnection(true)", `
     <div class="side-nav">
       <div class="side-item" onclick="setModule('dashboards')"><span>▥</span><span>Reports</span></div>
       <div class="side-item" onclick="setModule('automations')"><span>⚡</span><span>Automations</span></div>
@@ -660,7 +671,7 @@ function renderSpacesMain() {
   const projectName = getProjectName(state.selectedProject);
   return `<div class="content wide">
     <div class="project-head">
-      <div class="project-actions"><button class="btn-ghost btn-small" onclick="setModule('ai')">👓 Agents</button><button class="btn-ghost btn-small" onclick="setModule('more')">⚡ Automate</button><button class="btn-ghost btn-small" onclick="setModule('ai')">✽ AI</button><button class="btn-ghost btn-small" onclick="setModule('invite')">♙ Share</button></div>
+      <div class="project-actions"><button class="btn-ghost btn-small" onclick="setModule('ai')">👓 Agents</button><button class="btn-ghost btn-small" onclick="setModule('forms')">☑ Intake</button><button class="btn-ghost btn-small" onclick="setModule('dashboards')">▥ Report</button><button class="btn-ghost btn-small" onclick="setModule('docs')">▤ Docs</button></div>
       <div class="breadcrumb"><span>👥 Team Space</span><span>/</span><span>📁 Projects</span><span>/</span><strong>☑ ${projectName}</strong><button class="icon-btn flat">☆</button></div>
       <div class="tabs">
         ${viewTab('board','▦ Board')}
@@ -668,7 +679,7 @@ function renderSpacesMain() {
         ${viewTab('calendar','▣ Calendar')}
         ${viewTab('gantt','▰ Gantt')}
         ${viewTab('table','▥ Table')}
-        <button class="tab" onclick="toast('Create custom view placeholder')">＋ View</button>
+        <button class="tab" onclick="setModule('whiteboards')">✎ Whiteboard</button>
       </div>
     </div>
     <div class="view-toolbar">
@@ -808,8 +819,11 @@ function addTaskFromInput(value, status='TO DO') {
   render();
 }
 function quickAddTask(status='TO DO') {
-  const name = prompt('Task name');
-  if (name) addTaskFromInput(name, status);
+  const task = { id: uid(), projectId: state.selectedProject || 'p1', name: 'New task', assignee: 'adrian', due: new Date(Date.now()+86400000*5).toISOString().slice(0,10), priority: 'Normal', status, comments: [], estimate: 1, tracked: 0, billable: false, tags: ['New'], progress: 0, description: 'Created from quick add.', start: new Date().toISOString().slice(0,10), duration: 2, critical: false };
+  state.tasks.push(task);
+  selectedTaskId = task.id;
+  saveState();
+  render();
 }
 function updateTask(id, field, value) {
   const t = state.tasks.find(x => x.id === id);
@@ -1291,7 +1305,7 @@ function showModal(title, body){
 }
 
 function renderWhiteboardsMain() {
-  return `<div class="content"><div class="section-title"><div><h2>Visual Collaboration</h2><p style="margin:4px 0 0;color:var(--muted)">Whiteboards, canvas planning, and mind maps that convert ideas into coordinated action.</p></div><button class="btn-primary" onclick="toast('Sticky note converted to task')">Convert note to task</button></div>
+  return `<div class="content"><div class="section-title"><div><h2>Visual Collaboration</h2><p style="margin:4px 0 0;color:var(--muted)">Whiteboards, canvas planning, and mind maps that convert ideas into coordinated action.</p></div><button class="btn-primary" onclick="convertStickyToTask()">Convert note to task</button></div>
     <div class="whiteboard-canvas">
       <div class="sticky yellow">Project idea<br/><br/>AI turns this into a project plan.</div>
       <div class="sticky blue">Dashboard card<br/><br/>Live KPI with task drill-down.</div>
@@ -1554,7 +1568,7 @@ function renderDataLayerCards() {
   const submissions = (state.formSubmissions || []).length;
   const runs = (state.automationRuns || []).length;
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9.1 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • intake actions enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Forms</span><h3>Submissions</h3><div class="value">${submissions}</div><div class="trend">AI analysis and task routing available</div><button class="btn-secondary" onclick="setModule('forms')">Open forms</button></div>
     <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">/api/automations and /api/automations/run</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
@@ -1685,7 +1699,7 @@ function renderDataLayerCards() {
   const blocks = (state.plannerBlocks || []).length;
   const events = (state.calendarEvents || []).length;
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9.1 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • scheduling enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Planner</span><h3>Schedule objects</h3><div class="value">${blocks + events}</div><div class="trend">${blocks} planner blocks • ${events} calendar events</div><button class="btn-secondary" onclick="setModule('planner')">Open planner</button></div>
     <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/docs, /api/knowledge, /api/gantt, /api/planner</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
@@ -1694,7 +1708,7 @@ function renderDataLayerCards() {
 
 
 
-/* v0.9 Visual Collaboration / Whiteboards + Canvas + Mind Maps */
+/* v0.9.1 Visual Collaboration / Whiteboards + Canvas + Mind Maps */
 function defaultWhiteboardSeed(){
   return [{
     id:'wb1', name:'Launch Planning Board', icon:'✎', owner:'Adrian Francis', updated:'Today', favorite:true,
@@ -1814,7 +1828,7 @@ function selectVisualObject(id){ state.selectedVisualObject=id; toast('Selected 
 function createWhiteboard(){ ensureWhiteboardState(); const id=uid(); state.whiteboards.unshift({id, name:`New Strategy Board ${state.whiteboards.length+1}`, icon:'✎', owner:'Adrian Francis', updated:'Now', favorite:false, objects:[], edges:[], canvasCards:[], mindMap:{root:{id:'root',label:'New Strategy'},nodes:[]}}); state.selectedWhiteboard=id; saveState(); render(); toast('Whiteboard created'); }
 function addSticky(){ const w=selectedWhiteboard(); const id=uid(); w.objects=w.objects||[]; w.objects.push({id,type:'sticky',text:'New idea\n\nClick AI summarize or convert to task.',color:['yellow','blue','pink','green'][w.objects.length%4],x:90+(w.objects.length*42)%650,y:80+(w.objects.length*58)%330,w:182,h:126}); w.updated='Now'; saveState(); render(); toast('Sticky note added'); }
 function addCanvasCard(){ const w=selectedWhiteboard(); w.canvasCards=w.canvasCards||[]; w.canvasCards.push({id:uid(),title:'Live Work Card',kind:'Task Rollup',metric:`${state.tasks.filter(t=>t.status!=='DONE').length} open`,x:80+(w.canvasCards.length*60)%540,y:100+(w.canvasCards.length*72)%300,linkedType:'dashboard',linkedId:'d1'}); w.updated='Now'; saveState(); render(); toast('Canvas card added'); }
-function convertStickyToTask(){ const w=selectedWhiteboard(); const obj=(w.objects||[]).find(o=>o.id===state.selectedVisualObject) || (w.objects||[]).find(o=>o.type==='sticky'&&!o.taskId) || (w.objects||[])[0]; if(!obj){ toast('Add a sticky note first'); return; } const title=firstLine(obj.text); const task={id:uid(), projectId:state.selectedProject||'p1', name:title, assignee:'adrian', due:new Date(Date.now()+86400000*5).toISOString().slice(0,10), priority:'Normal', status:'TO DO', comments:[{by:'WorkMind',text:'Created from v0.9 visual collaboration board.'}], estimate:2, tracked:0, billable:false, tags:['Whiteboard'], progress:0, description:restLines(obj.text), start:new Date().toISOString().slice(0,10), duration:2, critical:false}; state.tasks.push(task); obj.taskId=task.id; w.updated='Now'; saveState(); render(); toast('Sticky converted to task'); }
+function convertStickyToTask(){ const w=selectedWhiteboard(); const obj=(w.objects||[]).find(o=>o.id===state.selectedVisualObject) || (w.objects||[]).find(o=>o.type==='sticky'&&!o.taskId) || (w.objects||[])[0]; if(!obj){ toast('Add a sticky note first'); return; } const title=firstLine(obj.text); const task={id:uid(), projectId:state.selectedProject||'p1', name:title, assignee:'adrian', due:new Date(Date.now()+86400000*5).toISOString().slice(0,10), priority:'Normal', status:'TO DO', comments:[{by:'WorkMind',text:'Created from v0.9.1 visual collaboration board.'}], estimate:2, tracked:0, billable:false, tags:['Whiteboard'], progress:0, description:restLines(obj.text), start:new Date().toISOString().slice(0,10), duration:2, critical:false}; state.tasks.push(task); obj.taskId=task.id; w.updated='Now'; saveState(); render(); toast('Sticky converted to task'); }
 function linkObjectToTask(){ const w=selectedWhiteboard(); const obj=(w.objects||[]).find(o=>o.id===state.selectedVisualObject) || (w.objects||[])[0]; const task=state.tasks.find(t=>t.status==='BLOCKED') || state.tasks.find(t=>t.status!=='DONE'); if(!obj||!task){ toast('Need an object and a task to link'); return; } obj.taskId=task.id; w.updated='Now'; saveState(); render(); toast(`Linked to ${task.name}`); }
 function openCanvasLink(type,id){ if(type==='module'){ setModule(id); return; } if(type==='task'){ openTask(id); return; } if(type==='doc'){ state.selectedDoc=id; setModule('docs'); return; } if(type==='form'){ setModule('forms'); return; } if(type==='dashboard'){ setModule('dashboards'); return; } if(type==='gantt'||id==='gantt'){ state.module='spaces'; state.view='gantt'; render(); return; } toast(`${type || 'Link'} opened`); }
 function localWhiteboardAI(w){ const stats=whiteboardStats(w); const blockers=state.tasks.filter(t=>t.status==='BLOCKED'); return {summary:`${w.name} has ${stats.objects} objects, ${stats.edges} relationships, ${stats.linkedTasks} linked task references, and ${stats.canvasCards} canvas cards. AI recommends converting unlinked ideas to tasks and reviewing ${blockers.length} blocker(s).`, actions:['Convert the highest-value sticky into a task','Link the Form Intake note to the project intake workflow','Review critical-path blockers before the next status report'], risks:blockers.map(t=>t.name).slice(0,3)}; }
@@ -1824,7 +1838,7 @@ async function refreshWhiteboardsFromApi(){ ensureWhiteboardState(); if(!apiOnli
 
 function showDataLayerStatus() {
   const message = apiOnline
-    ? `Connected to the v0.9 visual collaboration API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
+    ? `Connected to the v0.9.1 visual collaboration API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
     : 'Running in local fallback mode. Start Docker Compose to enable FastAPI persistence for whiteboards, canvas cards, and mind maps.';
   toast(message);
 }
@@ -1838,13 +1852,30 @@ function renderDataLayerCards() {
   const whiteboardCount = (state.whiteboards || []).length;
   const visualObjects = (state.whiteboards || []).reduce((sum,w)=>sum+(w.objects||[]).length+(w.canvasCards||[]).length+(w.mindMap?.nodes||[]).length,0);
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9.1 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • visual links enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Whiteboards</span><h3>Visual objects</h3><div class="value">${visualObjects}</div><div class="trend">${whiteboardCount} boards • canvas cards and mind maps</div><button class="btn-secondary" onclick="setModule('whiteboards')">Open whiteboards</button></div>
     <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/whiteboards, /api/docs, /api/gantt</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
   </div>`;
 }
 
+
+function createProjectList(){
+  const folder = state.spaces?.[0]?.folders?.[0];
+  if(!folder) return;
+  const id = 'p' + (folder.lists.filter(l=>l.kind==='project').length + 1);
+  folder.lists.push({id, name:`Project ${folder.lists.length}`, icon:'☑', kind:'project'});
+  state.selectedProject=id; state.module='spaces'; saveState(); render();
+}
+function addTeamMemberDemo(){
+  const id='member'+Date.now().toString(36).slice(-4);
+  state.members.push({id,name:'New Teammate',initials:'NT',avatar:'blue',role:'Member'});
+  saveState(); render();
+}
+function createGoalDemo(){
+  state.goals.unshift({id:uid(),name:'New execution goal',owner:'Adrian Francis',progress:0,status:'On Track'});
+  saveState(); render();
+}
 window.setModule = setModule;
 window.setView = setView;
 window.selectProject = selectProject;
@@ -1916,7 +1947,7 @@ async function removeGanttDependency(id){ if(apiOnline){ try{ const res=await fe
 async function rescheduleGanttTask(taskId, start, duration, cascade=true){ const t=taskById(taskId); if(!t) return; const newStart=start || t.start || t.due; const newDuration=duration || Number(t.duration||1); if(apiOnline){ try{ const res=await fetch(`${API_BASE}/gantt/tasks/${taskId}/schedule`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify({start:newStart, duration:newDuration, cascade, reason:'Updated from Gantt row controls'})}); if(res.ok){ const data=await res.json(); applyGanttPayload(data); toast(`Task rescheduled${cascade?' and dependents checked':''}`); saveState(); render(); return; }}catch(e){ console.warn(e); }} t.start=newStart; t.duration=newDuration; t.due=ganttAddDays(newStart,newDuration); if(cascade) cascadeLocalFrom(taskId); lastGanttDataset=computeLocalGanttDataset(state.selectedProject); toast('Task rescheduled locally'); saveState(); render(); }
 function shiftGanttTask(taskId, days){ const t=taskById(taskId); if(!t) return; rescheduleGanttTask(taskId, ganttAddDays(t.start||t.due, days), null, true); }
 function cascadeLocalFrom(taskId, seen=new Set()){ if(seen.has(taskId)) return; seen.add(taskId); const pred=taskById(taskId); if(!pred) return; (state.taskDependencies||[]).filter(d=>d.predecessorId===taskId).forEach(d=>{ const succ=taskById(d.successorId); if(!succ) return; const required=ganttAddDays(taskEndDate(pred), Number(d.lagDays||0)); if(ganttDate(succ.start||succ.due)<ganttDate(required)){ succ.start=required; succ.due=ganttAddDays(required, Math.max(1,Number(succ.duration||1))); cascadeLocalFrom(succ.id, seen); }}); }
-async function createGanttBaseline(){ const name=prompt('Baseline name', `Baseline ${new Date().toLocaleDateString()}`); if(!name) return; if(apiOnline){ try{ const res=await fetch(`${API_BASE}/gantt/baselines`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify({project_id:state.selectedProject, name})}); if(res.ok){ const data=await res.json(); applyGanttPayload(data); toast('Baseline captured'); saveState(); render(); return; }}catch(e){ console.warn(e); }} const snapshots=projectTasks().map(t=>({taskId:t.id,name:t.name,start:t.start,due:t.due,duration:t.duration,status:t.status,progress:t.progress})); state.ganttBaselines.push({id:uid(), projectId:state.selectedProject, name, taskSnapshots:snapshots, createdAt:new Date().toISOString()}); toast('Baseline captured locally'); saveState(); render(); }
+async function createGanttBaseline(){ const name=`Baseline ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`; if(apiOnline){ try{ const res=await fetch(`${API_BASE}/gantt/baselines`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify({project_id:state.selectedProject, name})}); if(res.ok){ const data=await res.json(); applyGanttPayload(data); toast('Baseline captured'); saveState(); render(); return; }}catch(e){ console.warn(e); }} const snapshots=projectTasks().map(t=>({taskId:t.id,name:t.name,start:t.start,due:t.due,duration:t.duration,status:t.status,progress:t.progress})); state.ganttBaselines.push({id:uid(), projectId:state.selectedProject, name, taskSnapshots:snapshots, createdAt:new Date().toISOString()}); toast('Baseline captured locally'); saveState(); render(); }
 
 window.refreshPlannerFromApi = refreshPlannerFromApi;
 window.setPlannerDate = setPlannerDate;
@@ -1934,6 +1965,10 @@ window.showDataLayerStatus = showDataLayerStatus;
 window.syncStateToApi = syncStateToApi;
 window.ensureDemoAuth = ensureDemoAuth;
 window.dismissBanner = dismissBanner;
+window.bootstrapConnection = bootstrapConnection;
+window.createProjectList = createProjectList;
+window.addTeamMemberDemo = addTeamMemberDemo;
+window.createGoalDemo = createGoalDemo;
 
 
 window.setVisualTab = setVisualTab;

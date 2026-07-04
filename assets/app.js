@@ -1,7 +1,10 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const STORAGE_KEY = 'thing-planner-workos-v091-state';
+const STORAGE_KEY = 'thing-planner-workos-v093-state';
+const LEGACY_STORAGE_KEYS = ['thing-planner-workos-v092-state', 'thing-planner-workos-v091-state'];
+const AUTH_TOKEN_KEY = 'thing-planner-workos-v093-token';
+const LEGACY_AUTH_TOKEN_KEYS = ['thing-planner-workos-v092-token', 'thing-planner-workos-v091-token'];
 const API_BASE = window.THING_PLANNER_API_BASE || '/api';
 let apiOnline = false;
 let apiStatusText = 'Connecting to API…';
@@ -9,7 +12,7 @@ let hasBootstrappedApi = false;
 let suppressApiSync = false;
 let syncTimer = null;
 let lastSyncAt = null;
-let authToken = localStorage.getItem('thing-planner-workos-v091-token') || null;
+let authToken = localStorage.getItem(AUTH_TOKEN_KEY) || LEGACY_AUTH_TOKEN_KEYS.map(k => localStorage.getItem(k)).find(Boolean) || null;
 let currentUser = null;
 let authStatusText = 'Checking demo auth…';
 let lastReportDataset = null;
@@ -25,7 +28,7 @@ const seedState = {
   knowledgeQuery: '',
   helper: false,
   aiPromo: false,
-  version: '0.9.1',
+  version: '0.9.3',
   workspace: {
     name: "Adrian Francis's Workspace",
     initials: 'A',
@@ -129,6 +132,7 @@ const seedState = {
 };
 
 let state = loadState();
+ensureAppState();
 ensurePlannerState();
 ensureGanttState();
 ensureWhiteboardState();
@@ -137,11 +141,38 @@ let formBuilderOpen = false;
 let selectedTaskId = null;
 
 function loadState() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return { ...seedState, ...JSON.parse(saved) };
-  } catch (e) { console.warn('Could not load saved state', e); }
+  const keys = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS];
+  for (const key of keys) {
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved) return { ...structuredClone(seedState), ...JSON.parse(saved) };
+    } catch (e) { console.warn(`Could not load saved state from ${key}`, e); }
+  }
   return structuredClone(seedState);
+}
+
+function ensureAppState() {
+  state.version = '0.9.3';
+  // v0.9.3 keeps the workspace clean: no feedback or promo overlays by default.
+  state.helper = false;
+  state.aiPromo = false;
+  state.members = Array.isArray(state.members) ? state.members : structuredClone(seedState.members);
+  state.spaces = Array.isArray(state.spaces) ? state.spaces : structuredClone(seedState.spaces);
+  state.tasks = Array.isArray(state.tasks) ? state.tasks : structuredClone(seedState.tasks);
+  state.notifications = Array.isArray(state.notifications) ? state.notifications : [];
+  state.dashboards = Array.isArray(state.dashboards) ? state.dashboards : structuredClone(seedState.dashboards);
+  state.reportCards = Array.isArray(state.reportCards) ? state.reportCards : structuredClone(seedState.reportCards);
+  state.forms = Array.isArray(state.forms) ? state.forms : structuredClone(seedState.forms);
+  state.formSubmissions = Array.isArray(state.formSubmissions) ? state.formSubmissions : [];
+  state.docs = Array.isArray(state.docs) ? state.docs : structuredClone(seedState.docs);
+  state.goals = Array.isArray(state.goals) ? state.goals : structuredClone(seedState.goals);
+  state.automations = Array.isArray(state.automations) ? state.automations : structuredClone(seedState.automations);
+  state.automationRuns = Array.isArray(state.automationRuns) ? state.automationRuns : [];
+  state.clips = Array.isArray(state.clips) ? state.clips : [];
+  state.subscription = state.subscription || null;
+  state.reportFilter = state.reportFilter || 'all';
+  state.selectedProject = state.selectedProject || firstProjectId() || 'p1';
+  state.selectedDoc = state.selectedDoc || state.docs[0]?.id || 'doc1';
 }
 
 function saveState() {
@@ -157,11 +188,12 @@ function scheduleApiSync() {
 async function syncStateToApi() {
   if (!apiOnline) return;
   try {
-    await fetch(`${window.THING_PLANNER_API_BASE || API_BASE}/state`, {
+    const response = await fetch(`${window.THING_PLANNER_API_BASE || API_BASE}/state`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ state })
     });
+    if (!response.ok) throw new Error(`State sync failed: ${response.status}`);
     lastSyncAt = new Date();
     apiStatusText = 'API synced';
   } catch (error) {
@@ -193,7 +225,7 @@ async function ensureDemoAuth() {
       const data = await response.json();
       authToken = data.token;
       currentUser = data.user;
-      localStorage.setItem('thing-planner-workos-v091-token', authToken);
+      localStorage.setItem(AUTH_TOKEN_KEY, authToken);
       authStatusText = `Demo auth: ${currentUser.display_name || currentUser.email}`;
     }
   } catch (error) {
@@ -226,13 +258,14 @@ async function bootstrapConnection(showFeedback=false, attempt=0) {
       const healthJson = await health.json();
       window.THING_PLANNER_API_BASE = base;
       apiOnline = true;
-      apiStatusText = `${healthJson.version || 'v0.9.1'} API connected`;
+      apiStatusText = `${healthJson.version || 'v0.9.3'} API connected`;
       const stateResponse = await fetch(`${base}/state`, { cache: 'no-store' });
       if (stateResponse.ok) {
         const data = await stateResponse.json();
         if (data && data.state) {
           suppressApiSync = true;
-          state = { ...state, ...data.state, version: '0.9.1', helper: false, aiPromo: false };
+          state = { ...state, ...data.state };
+          ensureAppState();
           localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
           suppressApiSync = false;
         }
@@ -422,14 +455,14 @@ function renderHomeSidebar() {
   return baseSidebar('Home', "quickAddTask()", `
     <div class="side-nav">
       ${sideItem('Inbox', '▣', state.module==='home', () => '')}
-      ${sideItem('Assigned Comments', '☟')}
-      ${sideItem('My Tasks', '♙')}
-      ${sideItem('More', '⋯')}
+      ${sideItem('Assigned Comments', '☟', false, "setHomeTab('Primary'); filterHomeFor('comments')")}
+      ${sideItem('My Tasks', '♙', false, "state.module='spaces'; state.selectedProject=firstProjectId(); render()")}
+      ${sideItem('More', '⋯', false, "setModule('more')")}
     </div>
     <div class="hr"></div>
     <div class="side-section">AI Chats</div>
     <div class="side-item" onclick="setModule('ai')"><span>＋</span><span class="label">Ask, Build, Create</span></div>
-    <div class="side-section">Spaces <button class="icon-btn flat" style="float:right;margin-top:-6px" onclick="toast('New Space placeholder')">＋</button></div>
+    <div class="side-section">Spaces <button class="icon-btn flat" style="float:right;margin-top:-6px" onclick="createSpace()">＋</button></div>
     ${renderSpacesTree(false)}
   `);
 }
@@ -437,7 +470,7 @@ function renderHomeSidebar() {
 function renderSpacesSidebar() {
   return baseSidebar('Spaces', "createProjectList()", `
     ${renderSpacesTree(true)}
-    <div class="tree-line" onclick="toast('New Space placeholder')"><span>＋</span><span>New Space</span></div>
+    <div class="tree-line" onclick="createSpace()"><span>＋</span><span>New Space</span></div>
   `);
 }
 
@@ -483,21 +516,6 @@ function renderAISidebar() {
   `, false);
 }
 
-function renderPlannerSidebar() {
-  return baseSidebar('Planner', "addFocusBlock()", `
-    <div class="side-nav">
-      <div class="side-item active"><span>▣</span><span>Today</span></div>
-      <div class="side-item"><span>☰</span><span>Upcoming</span></div>
-      <div class="side-item"><span>◷</span><span>Focus Blocks</span></div>
-      <div class="side-item"><span>✽</span><span>AI Schedule</span></div>
-    </div>
-    <div class="hr"></div>
-    <div class="side-section">Calendars</div>
-    <div class="side-item"><span>🟣</span><span>Work Tasks</span></div>
-    <div class="side-item"><span>🔵</span><span>Meetings</span></div>
-    <div class="side-item"><span>🟢</span><span>Goals</span></div>
-  `);
-}
 
 function renderTeamsSidebar() {
   return baseSidebar('Teams', "addTeamMemberDemo()", `
@@ -553,7 +571,7 @@ function renderGoalsSidebar() {
 }
 
 function renderClipsSidebar() {
-  return baseSidebar('Clips', "toast('Record clip placeholder')", `
+  return baseSidebar('Clips', "recordClipDemo()", `
     <div class="side-nav">
       <div class="side-item active"><span>▰</span><span>All Clips</span></div>
       <div class="side-item"><span>🎙</span><span>Transcripts</span></div>
@@ -576,34 +594,41 @@ function renderMoreSidebar() {
 }
 
 function renderInviteSidebar() {
-  return baseSidebar('Invite', "toast('Invite sent placeholder')", `
+  return baseSidebar('Invite', "inviteTeamDemo()", `
     <div class="side-section">Collaborate</div>
     <p style="padding:0 7px;color:var(--muted);line-height:1.5">Invite teammates, guests, and clients with controlled access to Spaces, Projects, Dashboards, Docs, and Forms.</p>
-    <button class="btn-primary" style="margin:8px 7px" onclick="toast('Invite modal placeholder')">Invite people</button>
+    <button class="btn-primary" style="margin:8px 7px" onclick="inviteTeamDemo()">Invite people</button>
   `);
 }
 
 function renderUpgradeSidebar() {
   return baseSidebar('Upgrade', null, `
     <div class="favorite-card" style="height:160px"><div><b>WorkOS Pro</b><br/><br/>Automations, AI Agents, dashboards, guests, and enterprise admin.</div></div>
-    <button class="btn-primary" style="margin:8px 7px" onclick="toast('Upgrade placeholder')">Upgrade</button>
+    <button class="btn-primary" style="margin:8px 7px" onclick="upgradePlanDemo('Enterprise')">Upgrade</button>
   `);
 }
 
-function sideItem(label, icon, active=false) {
-  return `<div class="side-item ${active ? 'active' : ''}"><span>${icon}</span><span class="label">${label}</span></div>`;
+function sideItem(label, icon, active=false, action='') {
+  const handler = action ? ` onclick="${action}"` : '';
+  return `<div class="side-item ${active ? 'active' : ''}"${handler}><span>${icon}</span><span class="label">${label}</span></div>`;
 }
 
 function renderSpacesTree(showCounts=true) {
-  const p1Count = state.tasks.filter(t => t.projectId === 'p1').length;
-  const p2Count = state.tasks.filter(t => t.projectId === 'p2').length;
+  const spaces = Array.isArray(state.spaces) ? state.spaces : [];
   return `<div class="tree">
-    <div class="tree-line ${state.module === 'spaces' && !state.selectedProject ? 'active' : ''}"><span>⚙</span><span>All Tasks - ${escapeHtml(state.workspace.name).slice(0, 23)}...</span></div>
-    <div class="tree-line"><span>👥</span><span>Team Space</span><span class="count">＋</span></div>
-    <div class="tree-line indent-1"><span>📁</span><span>Projects</span></div>
-    <div class="tree-line indent-2 ${state.selectedProject==='p1' ? 'active' : ''}" onclick="selectProject('p1')"><span>☑</span><span>Project 1</span>${showCounts ? `<span class="count">${p1Count}</span>` : ''}</div>
-    <div class="tree-line indent-2 ${state.selectedProject==='p2' ? 'active' : ''}" onclick="selectProject('p2')"><span>☑</span><span>Project 2</span>${showCounts ? `<span class="count">${p2Count}</span>` : ''}</div>
-    <div class="tree-line indent-2" onclick="setModule('docs')"><span>📄</span><span>Project Notes</span></div>
+    <div class="tree-line ${state.module === 'spaces' && !state.selectedProject ? 'active' : ''}" onclick="state.module='spaces'; state.selectedProject=firstProjectId(); render()"><span>⚙</span><span>All Tasks - ${escapeHtml(state.workspace.name).slice(0, 23)}...</span></div>
+    ${spaces.map(space => `
+      <div class="tree-line"><span>${space.icon || '👥'}</span><span>${escapeHtml(space.name)}</span><button class="count button-count" onclick="event.stopPropagation(); createProjectList('${space.id}')">＋</button></div>
+      ${(space.folders || []).map(folder => `
+        <div class="tree-line indent-1"><span>${folder.icon || '📁'}</span><span>${escapeHtml(folder.name)}</span></div>
+        ${(folder.lists || []).map(item => {
+          const count = state.tasks.filter(t => t.projectId === item.id).length;
+          const active = state.selectedProject === item.id;
+          const action = item.kind === 'doc' ? "setModule('docs')" : `selectProject('${item.id}')`;
+          return `<div class="tree-line indent-2 ${active ? 'active' : ''}" onclick="${action}"><span>${item.icon || '☑'}</span><span>${escapeHtml(item.name)}</span>${showCounts && item.kind !== 'doc' ? `<span class="count">${count}</span>` : ''}</div>`;
+        }).join('')}
+      `).join('')}
+    `).join('')}
   </div>`;
 }
 
@@ -695,7 +720,9 @@ function viewTab(view, label) {
   return `<button class="tab ${state.view===view ? 'active' : ''}" onclick="setView('${view}')">${label}</button>`;
 }
 function setView(view) { state.view = view; render(); if (view === 'gantt') refreshGanttFromApi(false); }
-function getProjectName(id) { return id === 'p2' ? 'Project 2' : 'Project 1'; }
+function allProjectLists(){ return (state.spaces||[]).flatMap(s => (s.folders||[]).flatMap(f => (f.lists||[]).filter(l => l.kind === 'project'))); }
+function firstProjectId(){ return allProjectLists()[0]?.id || 'p1'; }
+function getProjectName(id) { return allProjectLists().find(l => l.id === id)?.name || id || 'Project'; }
 function projectTasks() { return state.tasks.filter(t => t.projectId === state.selectedProject); }
 function renderProjectView() {
   if (state.view === 'board') return renderBoardView();
@@ -986,12 +1013,19 @@ function renderReportCard(card, dataset) {
 function setReportFilter(filter) { state.reportFilter = filter; lastReportDataset = null; toast(`Report filter: ${filter}`); render(); }
 
 function addReportCard() {
-  const title = prompt('Report card title', 'Custom Risk Card');
-  if (!title) return;
-  const metric = prompt('Metric: open_tasks, blocked_tasks, billable_hours, health, by_status, by_assignee', 'blocked_tasks') || 'open_tasks';
+  const templates = [
+    { title:'Upcoming Due Work', metric:'open_tasks', type:'kpi' },
+    { title:'Blocked Aging', metric:'blocked_tasks', type:'kpi' },
+    { title:'Billable Utilization', metric:'billable_hours', type:'kpi' },
+    { title:'Portfolio Health', metric:'health', type:'ai' },
+    { title:'Status Distribution', metric:'by_status', type:'chart' },
+    { title:'Team Load', metric:'by_assignee', type:'chart' }
+  ];
   state.reportCards = state.reportCards || [];
-  state.reportCards.push({ id: uid(), title, type: metric.includes('by_') ? 'chart' : 'kpi', metric });
-  toast('Report card added');
+  const next = templates[state.reportCards.length % templates.length];
+  state.reportCards.push({ id: uid(), ...next });
+  toast(`${next.title} card added`);
+  saveState();
   render();
 }
 
@@ -1063,53 +1097,8 @@ function renderInlineTaskActionTable(tasks) {
   return `<table class="inline-table"><thead><tr><th>Task</th><th>Status</th><th>Owner</th><th>Due</th><th></th></tr></thead><tbody>${tasks.map(t => `<tr><td onclick="openTask('${t.id}')"><b>${escapeHtml(t.name)}</b><br/><span class="muted-mini">${t.tags.join(', ')}</span></td><td><select class="inline-select" onchange="dashboardAction('${t.id}','set_status',this.value)">${statuses.map(s => `<option ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></td><td><select class="inline-select" onchange="dashboardAction('${t.id}','assign',this.value)">${state.members.map(m => `<option value="${m.id}" ${t.assignee===m.id?'selected':''}>${escapeHtml(m.name)}</option>`).join('')}</select></td><td><input class="inline-input" type="date" value="${t.due}" onchange="dashboardAction('${t.id}','set_due',this.value)" /></td><td><button class="btn-secondary btn-small" onclick="openTask('${t.id}')">Open</button></td></tr>`).join('')}</tbody></table>`;
 }
 
-function renderFormsMain() {
-  if (formBuilderOpen) return renderFormBuilder();
-  return `<div class="content wide">
-    <div class="template-wrap"><h1>Choose a Form template</h1><p>Create forms to kick off projects, collect feedback, and supercharge your productivity.</p>
-      <div class="template-grid">
-        ${templateCard('🎛','Feedback Form','Survey and collect feedback','green', 'openFormBuilder()')}
-        ${templateCard('📋','Project Intake','Streamline new project requests','pink', 'openFormBuilder()')}
-        ${templateCard('🧺','Order Form','Capture and process client orders','purple', 'openFormBuilder()')}
-        ${templateCard('👤','Job Application','Accept and review applications for open roles','orange', 'openFormBuilder()')}
-        ${templateCard('🧾','IT Requests','Triage and prioritize IT service requests','blue', 'openFormBuilder()')}
-        ${templateCard('＋','Start from scratch','Build a connected form that creates work','gray', 'openFormBuilder()')}
-      </div>
-    </div>
-    ${state.aiPromo ? renderBrainPromoWidget() : ''}
-  </div>`;
-}
 
 function openFormBuilder() { formBuilderOpen = true; state.module = 'forms'; render(); }
-function renderFormBuilder() {
-  return `<div class="content">
-    <div class="section-title"><div><h2>Project Intake Form</h2><p style="margin:4px 0 0;color:var(--muted)">Responses create tasks in Team Space / Projects / Project 1 and trigger AI analysis.</p></div><div><button class="btn-secondary" onclick="formBuilderOpen=false;render()">Templates</button><button class="btn-primary" onclick="submitFormDemo()">Submit test response</button></div></div>
-    <div class="form-builder">
-      <div class="report-card"><h3>Fields</h3>
-        ${['Project name','Requester','Department','Priority','Desired due date','Business objective','Attachment'].map((f,i) => `<div class="side-item"><span>${i+1}</span><span>${f}</span></div>`).join('')}
-        <div class="hr"></div><button class="btn-secondary" onclick="toast('Field added')">＋ Add Field</button>
-        <button class="btn-primary" style="margin-left:8px" onclick="toast('AI suggested 3 form improvements')">✽ AI Improve</button>
-      </div>
-      <div class="form-preview">
-        <h2>Project Intake</h2><p style="color:var(--muted)">Use this form to centralize new work and create a project kickoff task automatically.</p>
-        <div class="form-field"><label>Project name *</label><input id="formProjectName" placeholder="e.g., Launch customer dashboard" /></div>
-        <div class="form-field"><label>Requester *</label><input placeholder="Name or email" /></div>
-        <div class="form-field"><label>Priority</label><select><option>Normal</option><option>High</option><option>Urgent</option></select></div>
-        <div class="form-field"><label>Business objective</label><textarea placeholder="What result should this project deliver?"></textarea></div>
-        <button class="btn-primary" onclick="submitFormDemo()">Submit request</button>
-      </div>
-    </div>
-  </div>`;
-}
-function submitFormDemo() {
-  const name = ($('#formProjectName')?.value || 'New intake request from Form').trim();
-  state.tasks.push({ id: uid(), projectId: 'p1', name, assignee: 'mira', due: '2026-07-15', priority: 'Normal', status: 'TO DO', comments: [{ by:'AI Intake Agent', text:'AI classified this request as Project Intake and suggested Mira as owner.'}], estimate: 2, tracked: 0, billable: false, tags: ['Intake','AI'], progress: 0, description: 'Created from Project Intake Form.', start: '2026-07-12', duration: 3, critical: false });
-  toast('Form submitted → task created');
-  state.module = 'spaces';
-  state.selectedProject = 'p1';
-  state.view = 'list';
-  render();
-}
 
 function templateCard(icon, title, text, color, action, tag='') {
   const bg = { green:'#cdeee7', pink:'#ffd5eb', purple:'#ded8ff', orange:'#ffd8b7', blue:'#dce8ff', gray:'#f5f5f6' }[color] || '#f5f5f6';
@@ -1161,7 +1150,7 @@ function aiResponseFor(prompt) {
     return `<h3>Pending tasks located</h3>${renderInlineTaskActionTable(open)}<div>${sourcePills(open.map(t=>t.name))}</div>`;
   }
   if (/agent/i.test(prompt)) {
-    return `<h3>Create Super Agent</h3><p>Recommended first agent: <b>Project Manager Agent</b>. It monitors status changes, blockers, stale tasks, and due-date risk. It can draft updates and request approvals before making changes.</p><button class="btn-primary" onclick="toast('Project Manager Agent created')">Create Project Manager Agent</button>`;
+    return `<h3>Create Super Agent</h3><p>Recommended first agent: <b>Project Manager Agent</b>. It monitors status changes, blockers, stale tasks, and due-date risk. It can draft updates and request approvals before making changes.</p><button class="btn-primary" onclick="createAgentDemo()">Create Project Manager Agent</button>`;
   }
   return `<h3>Project Summary</h3><p><b>Project 1 health:</b> ${blocked.length ? 'At Risk' : 'On Track'}. ${open.length} open tasks remain. The most important risk is ${blocked[0]?.name || 'none detected'}. Billable tracking is active and dashboard/reporting work is underway.</p><ul><li>Next best action: unblock form mapping.</li><li>AI schedule recommendation: protect a 90-minute focus block today.</li><li>Dashboard recommendation: add a blocker aging card.</li></ul><div>${sourcePills(['Project 1','Dashboard tasks','Form automation','Task activity'])}</div>`;
 }
@@ -1174,22 +1163,10 @@ function createAITasks() {
   state.module='spaces'; state.view='list'; render();
 }
 
-function renderPlannerMain() {
-  const tasks = state.tasks.filter(t=>t.status!=='DONE').sort((a,b)=>priorityRank(a.priority)-priorityRank(b.priority));
-  return `<div class="content">
-    <div class="section-title"><div><h2>AI Planner</h2><p style="margin:4px 0 0;color:var(--muted)">Tasks and meetings converge into a priority-based daily schedule.</p></div><button class="btn-primary" onclick="toast('AI rescheduled your top priorities')">✽ Plan my day</button></div>
-    <div class="planner-grid">
-      <div class="report-card"><h3>Priority Queue</h3><div class="priority-list">${tasks.slice(0,7).map(t => `<div class="task-card" onclick="openTask('${t.id}')"><div class="task-card-title">${escapeHtml(t.name)}</div><div class="task-meta"><span>${t.priority}</span><span>${dateShort(t.due)}</span><span>${memberById(t.assignee).name}</span></div></div>`).join('')}</div></div>
-      <div class="report-card"><h3>Today</h3>
-        ${['08:30','09:30','11:00','13:00','14:30','16:00'].map((time,i) => `<div class="time-block"><div class="time">${time}</div><div class="timeline-panel"><b>${i===0?'Daily planning & inbox':tasks[i-1]?.name || 'Focus block'}</b><br/><span style="color:var(--muted)">${i===0?'AI review of blockers and due dates':'Scheduled from task priority, due date, and estimate'}</span></div><button class="btn-secondary btn-small" onclick="toast('Block updated')">Update</button></div>`).join('')}
-      </div>
-    </div>
-  </div>`;
-}
 function priorityRank(p) { return {Urgent:0, High:1, Normal:2, Low:3}[p] ?? 4; }
 
 function renderTeamsMain() {
-  return `<div class="content"><div class="section-title"><div><h2>Teams Hub</h2><p style="margin:4px 0 0;color:var(--muted)">Team priorities, activity, capacity, and AI standups.</p></div><button class="btn-primary" onclick="toast('AI standup generated')">✽ Generate Standup</button></div>
+  return `<div class="content"><div class="section-title"><div><h2>Teams Hub</h2><p style="margin:4px 0 0;color:var(--muted)">Team priorities, activity, capacity, and AI standups.</p></div><button class="btn-primary" onclick="generateTeamStandup()">✽ Generate Standup</button></div>
   <div class="cards-grid">${state.members.map(m => {
     const owned = state.tasks.filter(t=>t.assignee===m.id);
     return `<div class="kpi-card"><div style="display:flex;gap:10px;align-items:center"><span class="avatar ${m.avatar}">${m.initials}</span><div><b>${m.name}</b><div style="color:var(--muted);font-size:12px">${m.role}</div></div></div><div class="value">${owned.length}</div><div class="trend">${owned.filter(t=>t.status==='BLOCKED').length} blockers • ${owned.reduce((s,t)=>s+t.estimate,0)}h estimate</div></div>`;
@@ -1304,65 +1281,25 @@ function showModal(title, body){
   el.innerHTML=`<div class="modal-card"><button class="modal-close" onclick="this.closest('.modal-pop').remove()">×</button><h2>${escapeHtml(title)}</h2>${body}</div>`;
 }
 
-function renderWhiteboardsMain() {
-  return `<div class="content"><div class="section-title"><div><h2>Visual Collaboration</h2><p style="margin:4px 0 0;color:var(--muted)">Whiteboards, canvas planning, and mind maps that convert ideas into coordinated action.</p></div><button class="btn-primary" onclick="convertStickyToTask()">Convert note to task</button></div>
-    <div class="whiteboard-canvas">
-      <div class="sticky yellow">Project idea<br/><br/>AI turns this into a project plan.</div>
-      <div class="sticky blue">Dashboard card<br/><br/>Live KPI with task drill-down.</div>
-      <div class="sticky pink">Form intake<br/><br/>Centralize requests and trigger workflows.</div>
-      <div class="sticky green">Automation<br/><br/>Escalate blocked work automatically.</div>
-      <div class="connector-line" style="left:230px;top:142px;width:120px;transform:rotate(25deg)"></div>
-      <div class="connector-line" style="left:470px;top:180px;width:120px;transform:rotate(-30deg)"></div>
-      <div class="connector-line" style="left:670px;top:180px;width:120px;transform:rotate(35deg)"></div>
-    </div>
-  </div>`;
-}
 
 function renderGoalsMain() {
-  return `<div class="content"><div class="section-title"><div><h2>Goals and OKRs</h2><p style="margin:4px 0 0;color:var(--muted)">Company goals linked directly to tasks, dashboards, and rollups.</p></div><button class="btn-primary" onclick="toast('New goal placeholder')">＋ Goal</button></div>
-    <div class="goal-grid">${state.goals.map(g => `<div class="goal-card"><span class="badge ${g.status==='At Risk'?'warn':'green'}">${g.status}</span><h3>${escapeHtml(g.name)}</h3><p>Owner: ${g.owner}</p><div class="progress ${g.status==='At Risk'?'warn':'green'}"><span style="width:${g.progress}%"></span></div><br/><button class="btn-secondary" onclick="toast('Goal drill-down opened')">Drill down</button></div>`).join('')}</div>
+  return `<div class="content"><div class="section-title"><div><h2>Goals and OKRs</h2><p style="margin:4px 0 0;color:var(--muted)">Company goals linked directly to tasks, dashboards, and rollups.</p></div><button class="btn-primary" onclick="createGoalDemo()">＋ Goal</button></div>
+    <div class="goal-grid">${state.goals.map(g => `<div class="goal-card"><span class="badge ${g.status==='At Risk'?'warn':'green'}">${g.status}</span><h3>${escapeHtml(g.name)}</h3><p>Owner: ${g.owner}</p><div class="progress ${g.status==='At Risk'?'warn':'green'}"><span style="width:${g.progress}%"></span></div><br/><button class="btn-secondary" onclick="openGoalDrilldown('${g.id}')">Drill down</button></div>`).join('')}</div>
   </div>`;
 }
 
 function renderClipsMain() {
-  return `<div class="content"><div class="empty-center"><div class="big-icon">▰</div><h2>Record clips where work happens</h2><div>Screen recordings, voice notes, transcripts, and bug reports will attach directly to tasks and docs.</div><br/><button class="btn-primary" onclick="toast('Clip recording placeholder')">Record Clip</button></div></div>`;
+  return `<div class="content"><div class="empty-center"><div class="big-icon">▰</div><h2>Record clips where work happens</h2><div>Screen recordings, voice notes, transcripts, and bug reports will attach directly to tasks and docs.</div><br/><button class="btn-primary" onclick="recordClipDemo()">Record Clip</button></div></div>`;
 }
 
-function showDataLayerStatus() {
-  const message = apiOnline
-    ? `Connected to the v0.5 reporting API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
-    : 'Running in local fallback mode. Start Docker Compose to enable FastAPI persistence.';
-  toast(message);
-}
 
-function renderDataLayerCards() {
-  const tasks = state.tasks.length;
-  const projects = state.spaces.flatMap(s => s.folders || []).flatMap(f => f.lists || []).filter(l => l.kind === 'project').length;
-  const comments = state.tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0);
-  return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.5 Reporting + Data</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
-    <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • report actions enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
-    <div class="kpi-card"><span class="badge green">Auth</span><h3>Demo sign-in</h3><div class="value">${currentUser ? 'Active' : 'Local'}</div><div class="trend">${authStatusText}<br/>Demo email: echofoxx@gmail.com</div><button class="btn-secondary" onclick="ensureDemoAuth(); toast('Demo authentication requested')">Sign in</button></div>
-    <div class="kpi-card"><span class="badge green">New</span><h3>API endpoints</h3><p class="trend">/api/reports/dashboard, /api/reports/drilldown, /api/reports/actions, /api/reports/cards</p><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
-  </div>`;
-}
 
-function renderMoreMain() {
-  return `<div class="content"><div class="section-title"><div><h2>Automations and Connected Tools</h2><p style="margin:4px 0 0;color:var(--muted)">Streamline projects, scheduling, engineering, agencies, customer management, and persistent API-backed work data.</p></div><button class="btn-primary" onclick="toast('Create automation')">＋ Automation</button></div>
-    ${renderDataLayerCards()}
-    <div class="section-title"><h2>Automation templates</h2></div>
-    <div class="auto-grid">${state.automations.map(a => `<div class="auto-card"><span class="badge ${a.enabled?'green':''}">${a.enabled?'Enabled':'Paused'}</span><h3>${escapeHtml(a.name)}</h3><p>${a.category}<br/><b>When:</b> ${a.trigger}<br/><b>Then:</b> ${a.action}</p><button class="btn-secondary" onclick="toggleAutomation('${a.id}')">${a.enabled?'Pause':'Enable'}</button></div>`).join('')}
-    ${['Auto-assign urgent tasks','Notify when due date missed','Create kickoff checklist','Generate weekly status report','Move task when checklist complete','Create bug from failed build','Create client follow-up','Escalate stale approvals'].map(name => `<div class="auto-card"><span class="badge">Template</span><h3>${name}</h3><p>Trigger, condition, and action template ready to customize.</p><button class="btn-primary" onclick="toast('Automation template added')">Use template</button></div>`).join('')}
-    </div>
-  </div>`;
-}
-function toggleAutomation(id){ const a=state.automations.find(x=>x.id===id); a.enabled=!a.enabled; toast(a.enabled?'Automation enabled':'Automation paused'); render(); }
 
 function renderInviteMain() {
-  return `<div class="content"><div class="empty-center"><div class="big-icon">♙+</div><h2>Invite your team</h2><div>Add teammates, guests, agencies, clients, or stakeholders to collaborate in controlled workspaces.</div><br/><button class="btn-primary" onclick="toast('Invite sent placeholder')">Invite people</button></div></div>`;
+  return `<div class="content"><div class="empty-center"><div class="big-icon">♙+</div><h2>Invite your team</h2><div>Add teammates, guests, agencies, clients, or stakeholders to collaborate in controlled workspaces.</div><br/><button class="btn-primary" onclick="inviteTeamDemo()">Invite people</button></div></div>`;
 }
 function renderUpgradeMain() {
-  return `<div class="content"><div class="template-wrap"><h1>Upgrade your WorkOS</h1><p>Unlock Super Agents, unlimited dashboards, advanced automations, guests, audit logs, and enterprise controls.</p><div class="template-grid">${templateCard('✽','AI Plus','More AI usage, agents, and premium models','purple', 'toast("Upgrade placeholder")')}${templateCard('⚡','Automation Pro','Advanced rules and connected workflows','orange','toast("Upgrade placeholder")')}${templateCard('🔐','Enterprise','SSO, audit logs, roles, governance','blue','toast("Upgrade placeholder")')}</div></div></div>`;
+  return `<div class="content"><div class="template-wrap"><h1>Upgrade your WorkOS</h1><p>Unlock Super Agents, unlimited dashboards, advanced automations, guests, audit logs, and enterprise controls.</p><div class="template-grid">${templateCard('✽','AI Plus','More AI usage, agents, and premium models','purple', 'upgradePlanDemo("AI Plus")')}${templateCard('⚡','Automation Pro','Advanced rules and connected workflows','orange','upgradePlanDemo("Automation Pro")')}${templateCard('🔐','Enterprise','SSO, audit logs, roles, governance','blue','upgradePlanDemo("Enterprise")')}</div></div></div>`;
 }
 
 function renderFeedbackWidget() {
@@ -1447,8 +1384,8 @@ function renderFormBuilder() {
     <div class="form-builder v05-form-builder">
       <div class="report-card"><h3>Fields and mapping</h3>
         ${fields.map((f,i) => `<div class="mapping-row"><div><b>${i+1}. ${escapeHtml(f[1])}</b><br/><span>${escapeHtml(f[2])}</span></div><span class="badge">${escapeHtml(f[3])}</span></div>`).join('')}
-        <div class="hr"></div><button class="btn-secondary" onclick="toast('Field added to builder')">＋ Add Field</button>
-        <button class="btn-primary" style="margin-left:8px" onclick="toast('AI suggested conditional priority routing and duplicate detection')">✽ AI Improve</button>
+        <div class="hr"></div><button class="btn-secondary" onclick="addFormFieldDemo()">＋ Add Field</button>
+        <button class="btn-primary" style="margin-left:8px" onclick="improveFormWithAI()">✽ AI Improve</button>
       </div>
       <div class="form-preview">
         <h2>Project Intake</h2><p style="color:var(--muted)">Use this form to centralize new work, create a task, route the owner, and trigger intake automations.</p>
@@ -1545,7 +1482,7 @@ function renderMoreMain() {
     ${renderDataLayerCards()}
     <div class="section-title"><h2>Automation templates</h2><button class="btn-secondary" onclick="setModule('forms')">Open Forms</button></div>
     <div class="auto-grid">${state.automations.map(a => `<div class="auto-card"><span class="badge ${a.enabled?'green':''}">${a.enabled?'Enabled':'Paused'}</span><h3>${escapeHtml(a.name)}</h3><p>${escapeHtml(a.category)}<br/><b>When:</b> ${escapeHtml(a.trigger)}<br/><b>Then:</b> ${escapeHtml(a.action)}</p><button class="btn-secondary" onclick="toggleAutomation('${a.id}')">${a.enabled?'Pause':'Enable'}</button></div>`).join('')}
-    ${['Escalate urgent intake','Route agency kickoff','Create approval request','Refresh form dashboard','Create follow-up from report','Notify client success'].map(name => `<div class="auto-card"><span class="badge">Template</span><h3>${name}</h3><p>Trigger, condition, and action template ready to customize.</p><button class="btn-primary" onclick="toast('Automation template added')">Use template</button></div>`).join('')}</div>
+    ${['Escalate urgent intake','Route agency kickoff','Create approval request','Refresh form dashboard','Create follow-up from report','Notify client success'].map(name => `<div class="auto-card"><span class="badge">Template</span><h3>${name}</h3><p>Trigger, condition, and action template ready to customize.</p><button class="btn-primary" onclick="useAutomationTemplate('${name}')">Use template</button></div>`).join('')}</div>
     <div class="section-title"><h2>Automation run history</h2><button class="btn-secondary" onclick="refreshFormsFromApi()">Refresh runs</button></div>
     <div class="report-card"><table class="report-table"><thead><tr><th>Run</th><th>Trigger</th><th>Source</th><th>Status</th><th>Time</th></tr></thead><tbody>${runs.map(r=>`<tr><td>${escapeHtml(r.summary)}</td><td>${escapeHtml(r.trigger)}</td><td>${escapeHtml(r.sourceType)} / ${escapeHtml(r.sourceId)}</td><td><span class="badge green">${escapeHtml(r.status)}</span></td><td>${new Date(r.createdAt).toLocaleString()}</td></tr>`).join('') || '<tr><td colspan="5">No automation runs yet.</td></tr>'}</tbody></table></div>
   </div>`;
@@ -1561,19 +1498,6 @@ async function toggleAutomation(id){
   const a=state.automations.find(x=>x.id===id); if (!a) return; a.enabled=!a.enabled; toast(a.enabled?'Automation enabled':'Automation paused'); saveState(); render();
 }
 
-function renderDataLayerCards() {
-  const tasks = state.tasks.length;
-  const projects = state.spaces.flatMap(s => s.folders || []).flatMap(f => f.lists || []).filter(l => l.kind === 'project').length;
-  const comments = state.tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0);
-  const submissions = (state.formSubmissions || []).length;
-  const runs = (state.automationRuns || []).length;
-  return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9.1 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
-    <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • intake actions enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
-    <div class="kpi-card"><span class="badge purple">Forms</span><h3>Submissions</h3><div class="value">${submissions}</div><div class="trend">AI analysis and task routing available</div><button class="btn-secondary" onclick="setModule('forms')">Open forms</button></div>
-    <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">/api/automations and /api/automations/run</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
-  </div>`;
-}
 
 
 
@@ -1664,7 +1588,7 @@ function renderPlannerMain() {
         <div class="planner-pref-row"><span>Blocked tasks</span><b>${state.plannerPreferences.auto_schedule_blocked ? 'Include' : 'Exclude'}</b></div>
       </div>
     </div>
-    <div class="section-title"><h2>Week strip</h2><button class="btn-secondary" onclick="toast('Week optimization placeholder')">Optimize week</button></div>
+    <div class="section-title"><h2>Week strip</h2><button class="btn-secondary" onclick="optimizeWeek()">Optimize week</button></div>
     <div class="planner-week-strip">${[0,1,2,3,4,5,6].map(offset=>renderWeekDay(offset)).join('')}</div>
   </div>`;
 }
@@ -1690,25 +1614,10 @@ async function addFocusBlock(){ ensurePlannerState(); const start='10:00'; if(ap
 async function removePlannerBlock(blockId){ if(!blockId) return; if(apiOnline){ try{ const res=await fetch(`${API_BASE}/planner/blocks/${blockId}`, {method:'DELETE', headers:authHeaders()}); if(res.ok){ const data=await res.json(); if(data.state) state={...state,...data.state}; toast('Planner block removed'); saveState(); render(); return; }}catch(err){ console.warn(err); }} state.plannerBlocks=(state.plannerBlocks||[]).filter(b=>b.id!==blockId); toast('Planner block removed locally'); saveState(); render(); }
 function clearAISchedule(){ state.plannerBlocks=(state.plannerBlocks||[]).filter(b=>!(samePlannerDay(b.startAt)&&b.blockType==='ai_task')); toast('AI schedule blocks cleared'); saveState(); render(); }
 async function addCalendarMeetingDemo(){ ensurePlannerState(); const event={title:'New planning sync', kind:'meeting', start_at:`${state.selectedPlannerDate}T14:00:00`, end_at:`${state.selectedPlannerDate}T14:30:00`, source:'manual', owner_id:'adrian', color:'blue', metadata:{created_from:'planner_ui'}}; if(apiOnline){ try{ const res=await fetch(`${API_BASE}/planner/events`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body: JSON.stringify(event)}); if(res.ok){ const data=await res.json(); applyPlannerPayload(data); toast('Meeting added'); saveState(); render(); return; }}catch(err){ console.warn(err); }} state.calendarEvents.push({id:uid(), title:event.title, kind:event.kind, startAt:event.start_at, endAt:event.end_at, source:'manual', ownerId:'adrian', color:'blue'}); toast('Meeting added locally'); saveState(); render(); }
-function renderDataLayerCards() {
-  const tasks = state.tasks.length;
-  const projects = state.spaces.flatMap(s => s.folders || []).flatMap(f => f.lists || []).filter(l => l.kind === 'project').length;
-  const comments = state.tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0);
-  const submissions = (state.formSubmissions || []).length;
-  const runs = (state.automationRuns || []).length;
-  const blocks = (state.plannerBlocks || []).length;
-  const events = (state.calendarEvents || []).length;
-  return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9.1 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
-    <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • scheduling enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
-    <div class="kpi-card"><span class="badge purple">Planner</span><h3>Schedule objects</h3><div class="value">${blocks + events}</div><div class="trend">${blocks} planner blocks • ${events} calendar events</div><button class="btn-secondary" onclick="setModule('planner')">Open planner</button></div>
-    <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/docs, /api/knowledge, /api/gantt, /api/planner</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
-  </div>`;
-}
 
 
 
-/* v0.9.1 Visual Collaboration / Whiteboards + Canvas + Mind Maps */
+/* v0.9.3 Visual Collaboration / Whiteboards + Canvas + Mind Maps */
 function defaultWhiteboardSeed(){
   return [{
     id:'wb1', name:'Launch Planning Board', icon:'✎', owner:'Adrian Francis', updated:'Today', favorite:true,
@@ -1828,9 +1737,9 @@ function selectVisualObject(id){ state.selectedVisualObject=id; toast('Selected 
 function createWhiteboard(){ ensureWhiteboardState(); const id=uid(); state.whiteboards.unshift({id, name:`New Strategy Board ${state.whiteboards.length+1}`, icon:'✎', owner:'Adrian Francis', updated:'Now', favorite:false, objects:[], edges:[], canvasCards:[], mindMap:{root:{id:'root',label:'New Strategy'},nodes:[]}}); state.selectedWhiteboard=id; saveState(); render(); toast('Whiteboard created'); }
 function addSticky(){ const w=selectedWhiteboard(); const id=uid(); w.objects=w.objects||[]; w.objects.push({id,type:'sticky',text:'New idea\n\nClick AI summarize or convert to task.',color:['yellow','blue','pink','green'][w.objects.length%4],x:90+(w.objects.length*42)%650,y:80+(w.objects.length*58)%330,w:182,h:126}); w.updated='Now'; saveState(); render(); toast('Sticky note added'); }
 function addCanvasCard(){ const w=selectedWhiteboard(); w.canvasCards=w.canvasCards||[]; w.canvasCards.push({id:uid(),title:'Live Work Card',kind:'Task Rollup',metric:`${state.tasks.filter(t=>t.status!=='DONE').length} open`,x:80+(w.canvasCards.length*60)%540,y:100+(w.canvasCards.length*72)%300,linkedType:'dashboard',linkedId:'d1'}); w.updated='Now'; saveState(); render(); toast('Canvas card added'); }
-function convertStickyToTask(){ const w=selectedWhiteboard(); const obj=(w.objects||[]).find(o=>o.id===state.selectedVisualObject) || (w.objects||[]).find(o=>o.type==='sticky'&&!o.taskId) || (w.objects||[])[0]; if(!obj){ toast('Add a sticky note first'); return; } const title=firstLine(obj.text); const task={id:uid(), projectId:state.selectedProject||'p1', name:title, assignee:'adrian', due:new Date(Date.now()+86400000*5).toISOString().slice(0,10), priority:'Normal', status:'TO DO', comments:[{by:'WorkMind',text:'Created from v0.9.1 visual collaboration board.'}], estimate:2, tracked:0, billable:false, tags:['Whiteboard'], progress:0, description:restLines(obj.text), start:new Date().toISOString().slice(0,10), duration:2, critical:false}; state.tasks.push(task); obj.taskId=task.id; w.updated='Now'; saveState(); render(); toast('Sticky converted to task'); }
+function convertStickyToTask(){ const w=selectedWhiteboard(); const obj=(w.objects||[]).find(o=>o.id===state.selectedVisualObject) || (w.objects||[]).find(o=>o.type==='sticky'&&!o.taskId) || (w.objects||[])[0]; if(!obj){ toast('Add a sticky note first'); return; } const title=firstLine(obj.text); const task={id:uid(), projectId:state.selectedProject||'p1', name:title, assignee:'adrian', due:new Date(Date.now()+86400000*5).toISOString().slice(0,10), priority:'Normal', status:'TO DO', comments:[{by:'WorkMind',text:'Created from v0.9.3 visual collaboration board.'}], estimate:2, tracked:0, billable:false, tags:['Whiteboard'], progress:0, description:restLines(obj.text), start:new Date().toISOString().slice(0,10), duration:2, critical:false}; state.tasks.push(task); obj.taskId=task.id; w.updated='Now'; saveState(); render(); toast('Sticky converted to task'); }
 function linkObjectToTask(){ const w=selectedWhiteboard(); const obj=(w.objects||[]).find(o=>o.id===state.selectedVisualObject) || (w.objects||[])[0]; const task=state.tasks.find(t=>t.status==='BLOCKED') || state.tasks.find(t=>t.status!=='DONE'); if(!obj||!task){ toast('Need an object and a task to link'); return; } obj.taskId=task.id; w.updated='Now'; saveState(); render(); toast(`Linked to ${task.name}`); }
-function openCanvasLink(type,id){ if(type==='module'){ setModule(id); return; } if(type==='task'){ openTask(id); return; } if(type==='doc'){ state.selectedDoc=id; setModule('docs'); return; } if(type==='form'){ setModule('forms'); return; } if(type==='dashboard'){ setModule('dashboards'); return; } if(type==='gantt'||id==='gantt'){ state.module='spaces'; state.view='gantt'; render(); return; } toast(`${type || 'Link'} opened`); }
+function openCanvasLink(type,id){ if(type==='module'){ setModule(id); return; } if(type==='list' || type==='project'){ state.selectedProject=id || firstProjectId(); state.module='spaces'; state.view='list'; render(); return; } if(type==='task'){ openTask(id); return; } if(type==='doc'){ state.selectedDoc=id; setModule('docs'); return; } if(type==='form'){ setModule('forms'); return; } if(type==='dashboard'){ setModule('dashboards'); return; } if(type==='view' && ['list','board','calendar','gantt','table'].includes(id)){ state.module='spaces'; state.view=id; render(); return; } if(type==='gantt'||id==='gantt'){ state.module='spaces'; state.view='gantt'; render(); return; } if(type==='action' && String(id||'').includes('ai')){ setModule('ai'); return; } toast(`${type || 'Link'} opened`); }
 function localWhiteboardAI(w){ const stats=whiteboardStats(w); const blockers=state.tasks.filter(t=>t.status==='BLOCKED'); return {summary:`${w.name} has ${stats.objects} objects, ${stats.edges} relationships, ${stats.linkedTasks} linked task references, and ${stats.canvasCards} canvas cards. AI recommends converting unlinked ideas to tasks and reviewing ${blockers.length} blocker(s).`, actions:['Convert the highest-value sticky into a task','Link the Form Intake note to the project intake workflow','Review critical-path blockers before the next status report'], risks:blockers.map(t=>t.name).slice(0,3)}; }
 async function runWhiteboardAI(){ const w=selectedWhiteboard(); if(apiOnline){ try{ const res=await fetch(`${API_BASE}/whiteboards/${w.id}/ai-summary`,{method:'POST',headers:authHeaders()}); if(res.ok){ const data=await res.json(); if(data.whiteboards) state.whiteboards=data.whiteboards; state.whiteboardAiInsights=[data.summary]; toast('AI visual summary generated'); saveState(); render(); return; }}catch(e){ console.warn(e); }} state.whiteboardAiInsights=[localWhiteboardAI(w)]; toast('AI visual summary generated locally'); saveState(); render(); }
 async function refreshWhiteboardsFromApi(){ ensureWhiteboardState(); if(!apiOnline){ toast('Whiteboards running locally'); render(); return; } try{ const res=await fetch(`${API_BASE}/whiteboards`,{headers:authHeaders(),cache:'no-store'}); if(!res.ok) throw new Error('Whiteboard API failed'); const data=await res.json(); state.whiteboards=data.whiteboards||state.whiteboards; if(!state.selectedWhiteboard&&state.whiteboards[0]) state.selectedWhiteboard=state.whiteboards[0].id; toast('Whiteboards refreshed from API'); saveState(); render(); }catch(e){ console.warn(e); toast('Whiteboard API unavailable; using local boards'); } }
@@ -1838,7 +1747,7 @@ async function refreshWhiteboardsFromApi(){ ensureWhiteboardState(); if(!apiOnli
 
 function showDataLayerStatus() {
   const message = apiOnline
-    ? `Connected to the v0.9.1 visual collaboration API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
+    ? `Connected to the v0.9.3 visual collaboration API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
     : 'Running in local fallback mode. Start Docker Compose to enable FastAPI persistence for whiteboards, canvas cards, and mind maps.';
   toast(message);
 }
@@ -1852,7 +1761,7 @@ function renderDataLayerCards() {
   const whiteboardCount = (state.whiteboards || []).length;
   const visualObjects = (state.whiteboards || []).reduce((sum,w)=>sum+(w.objects||[]).length+(w.canvasCards||[]).length+(w.mindMap?.nodes||[]).length,0);
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9.1 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9.3 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • visual links enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Whiteboards</span><h3>Visual objects</h3><div class="value">${visualObjects}</div><div class="trend">${whiteboardCount} boards • canvas cards and mind maps</div><button class="btn-secondary" onclick="setModule('whiteboards')">Open whiteboards</button></div>
     <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/whiteboards, /api/docs, /api/gantt</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
@@ -1860,12 +1769,112 @@ function renderDataLayerCards() {
 }
 
 
-function createProjectList(){
-  const folder = state.spaces?.[0]?.folders?.[0];
-  if(!folder) return;
-  const id = 'p' + (folder.lists.filter(l=>l.kind==='project').length + 1);
-  folder.lists.push({id, name:`Project ${folder.lists.length}`, icon:'☑', kind:'project'});
-  state.selectedProject=id; state.module='spaces'; saveState(); render();
+function filterHomeFor(kind){
+  if(kind === 'comments') {
+    activeHomeTab = 'Primary';
+    const commented = state.tasks.find(t => (t.comments||[]).length);
+    if(commented){ state.module='spaces'; state.selectedProject=commented.projectId; selectedTaskId=commented.id; }
+    toast(commented ? 'Opened latest assigned comment thread' : 'No assigned comments found');
+    render();
+  }
+}
+
+function createSpace(){
+  const idx = (state.spaces || []).length + 1;
+  const spaceId = `s${Date.now().toString(36)}`;
+  const folderId = `f${Date.now().toString(36)}`;
+  const projectId = `p${Date.now().toString(36)}`;
+  state.spaces = state.spaces || [];
+  state.spaces.push({ id: spaceId, name: `New Space ${idx}`, icon: '👥', folders: [{ id: folderId, name: 'Projects', icon: '📁', lists: [{ id: projectId, name: 'Project 1', icon: '☑', kind: 'project' }] }] });
+  state.selectedProject = projectId;
+  state.module = 'spaces';
+  state.view = 'list';
+  toast('Space created with a working project list');
+  saveState();
+  render();
+}
+
+function addFormFieldDemo(){
+  const f = state.forms.find(x => x.id === 'form1');
+  const field = { id:`field_${uid()}`, label:'Stakeholder impact', type:'long_text', required:false };
+  if(f){
+    f.schema = f.schema || {};
+    f.schema.fields = Array.isArray(f.schema.fields) ? f.schema.fields : [];
+    f.schema.fields.push(field);
+  }
+  toast('Field added to Project Intake schema');
+  saveState();
+  render();
+}
+
+function improveFormWithAI(){
+  const f = state.forms.find(x => x.id === 'form1');
+  if(f){
+    f.schema = { ...(f.schema||{}), ai_analysis:true, duplicate_detection:true, priority_routing:{Urgent:'adrian', High:'mira', Normal:'tom'}, automation_chain:['auto_intake_classify','auto_intake_task','auto_intake_notify','auto_intake_dashboard'] };
+  }
+  toast('AI routing, duplicate checks, and automation chain applied');
+  saveState();
+  render();
+}
+
+function useAutomationTemplate(name){
+  state.automations = state.automations || [];
+  const exists = state.automations.some(a => a.name === name);
+  if(!exists){
+    state.automations.unshift({ id:`auto_${uid()}`, name, category:'Template', enabled:true, trigger:'Manual or matching event', action:'Create task, notify owner, and record run history' });
+  }
+  toast(exists ? 'Automation template already enabled' : `${name} automation enabled`);
+  saveState();
+  render();
+}
+
+function optimizeWeek(){
+  ensurePlannerState();
+  const base = new Date(state.selectedPlannerDate + 'T00:00:00');
+  for(let i=0;i<5;i++){
+    const d = new Date(base); d.setDate(base.getDate()+i);
+    const day = d.toISOString().slice(0,10);
+    const open = state.tasks.filter(t=>t.status!=='DONE').sort((a,b)=>priorityScoreLocal(b)-priorityScoreLocal(a)).slice(i, i+2);
+    open.forEach((t,idx)=>{
+      const start = idx === 0 ? '09:30' : '14:00';
+      if(!(state.plannerBlocks||[]).some(b=>b.taskId===t.id && String(b.startAt).slice(0,10)===day)){
+        state.plannerBlocks.push({id:uid(), taskId:t.id, title:t.name, ownerId:t.assignee, startAt:`${day}T${start}:00`, endAt:addMinutesIso(`${day}T${start}:00`, 75), blockType:'ai_task', status:'planned', score:priorityScoreLocal(t), reason:'Weekly optimization placed this priority task'});
+      }
+    });
+  }
+  toast('Week optimized with priority focus blocks');
+  saveState();
+  render();
+}
+
+function createAgentDemo(){
+  useAutomationTemplate('Project Manager Agent');
+  state.aiMessages = state.aiMessages || [];
+  state.aiMessages.unshift({ id:uid(), role:'agent', text:'Project Manager Agent created. It watches blockers, stale tasks, due dates, and dashboard risks.', createdAt:new Date().toISOString() });
+}
+
+function generateTeamStandup(){
+  const lines = state.members.map(m => {
+    const owned = state.tasks.filter(t=>t.assignee===m.id && t.status!=='DONE');
+    const blockers = owned.filter(t=>t.status==='BLOCKED');
+    return `<li><b>${escapeHtml(m.name)}:</b> ${owned.length} open tasks, ${blockers.length} blockers, ${owned.reduce((s,t)=>s+Number(t.estimate||0),0)}h planned.</li>`;
+  }).join('');
+  showModal('AI Team Standup', `<p><b>BLUF:</b> Team workload is traceable to active tasks and blockers.</p><ul>${lines}</ul>`);
+  toast('AI standup generated');
+}
+
+function createProjectList(spaceId=null){
+  const space = (state.spaces||[]).find(s=>s.id===spaceId) || state.spaces?.[0];
+  if(!space){ createSpace(); return; }
+  space.folders = space.folders && space.folders.length ? space.folders : [{id:`f${uid()}`, name:'Projects', icon:'📁', lists:[]}];
+  const folder = space.folders[0];
+  folder.lists = folder.lists || [];
+  const projectNumber = folder.lists.filter(l=>l.kind==='project').length + 1;
+  const id = `p${Date.now().toString(36)}${projectNumber}`;
+  folder.lists.push({id, name:`Project ${projectNumber}`, icon:'☑', kind:'project'});
+  state.selectedProject=id; state.module='spaces'; state.view='list';
+  toast('Project list created');
+  saveState(); render();
 }
 function addTeamMemberDemo(){
   const id='member'+Date.now().toString(36).slice(-4);
@@ -1874,6 +1883,40 @@ function addTeamMemberDemo(){
 }
 function createGoalDemo(){
   state.goals.unshift({id:uid(),name:'New execution goal',owner:'Adrian Francis',progress:0,status:'On Track'});
+  saveState(); render();
+}
+
+function openGoalDrilldown(id){
+  const goal = (state.goals||[]).find(g=>g.id===id);
+  if(!goal) return toast('Goal not found');
+  const linked = state.tasks.filter(t => String(t.name||'').toLowerCase().includes('goal') || t.status !== 'DONE').slice(0,5);
+  showModal('Goal Drill-down', `<p><b>${escapeHtml(goal.name)}</b></p><p>Owner: ${escapeHtml(goal.owner)} • Status: ${escapeHtml(goal.status)} • Progress: ${goal.progress}%</p><div class="progress ${goal.status==='At Risk'?'warn':'green'}"><span style="width:${goal.progress}%"></span></div><h3>Linked work</h3><ul>${linked.map(t=>`<li>${escapeHtml(t.name)} — ${escapeHtml(t.status)}</li>`).join('')}</ul>`);
+}
+function recordClipDemo(){
+  state.clips = state.clips || [];
+  const clip = {id:uid(), title:`Clip ${state.clips.length+1}: Workspace walkthrough`, createdAt:new Date().toISOString(), linkedTaskId:state.selectedTask || state.tasks[0]?.id || null, transcript:'Demo transcript generated locally and ready to attach to tasks/docs.'};
+  state.clips.unshift(clip);
+  toast('Clip recorded and linked locally');
+  showModal('Clip Recorded', `<p><b>${escapeHtml(clip.title)}</b></p><p>${escapeHtml(clip.transcript)}</p>`);
+  saveState();
+}
+function inviteTeamDemo(){
+  const already = (state.members||[]).some(m=>m.id==='guest_demo');
+  if(!already){ state.members.push({id:'guest_demo', name:'Guest Stakeholder', initials:'GS', avatar:'green', role:'Guest'}); }
+  toast(already ? 'Guest invite already exists' : 'Guest invite created');
+  showModal('Invite Ready', '<p>Created a demo guest stakeholder with controlled workspace access. In production this would send an email invite and enforce role permissions.</p>');
+  saveState(); render();
+}
+function upgradePlanDemo(plan){
+  state.subscription = {plan, status:'Demo selected', selectedAt:new Date().toISOString()};
+  toast(`${plan} plan selected for demo`);
+  showModal('Plan Selected', `<p><b>${escapeHtml(plan)}</b> is now recorded in local demo state.</p><p>Production next step: connect billing, SSO, audit logs, and policy controls.</p>`);
+  saveState();
+}
+function createAutomationDemo(){
+  const id=`auto_${uid()}`;
+  state.automations.unshift({id, name:'New workflow automation', category:'Automate Projects', enabled:true, trigger:'Task status changes', action:'Notify owner, update dashboard, and record activity'});
+  toast('Automation created');
   saveState(); render();
 }
 window.setModule = setModule;
@@ -1966,9 +2009,22 @@ window.syncStateToApi = syncStateToApi;
 window.ensureDemoAuth = ensureDemoAuth;
 window.dismissBanner = dismissBanner;
 window.bootstrapConnection = bootstrapConnection;
+window.createSpace = createSpace;
 window.createProjectList = createProjectList;
+window.filterHomeFor = filterHomeFor;
+window.addFormFieldDemo = addFormFieldDemo;
+window.improveFormWithAI = improveFormWithAI;
+window.useAutomationTemplate = useAutomationTemplate;
+window.optimizeWeek = optimizeWeek;
+window.createAgentDemo = createAgentDemo;
+window.generateTeamStandup = generateTeamStandup;
 window.addTeamMemberDemo = addTeamMemberDemo;
 window.createGoalDemo = createGoalDemo;
+window.openGoalDrilldown = openGoalDrilldown;
+window.recordClipDemo = recordClipDemo;
+window.inviteTeamDemo = inviteTeamDemo;
+window.upgradePlanDemo = upgradePlanDemo;
+window.createAutomationDemo = createAutomationDemo;
 
 
 window.setVisualTab = setVisualTab;

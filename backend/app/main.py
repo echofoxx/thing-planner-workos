@@ -34,7 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 
-APP_VERSION = "v0.9.2"
+APP_VERSION = "v0.9.3"
 DEFAULT_WORKSPACE_ID = "w1"
 DEFAULT_OWNER_ID = "adrian"
 SEED_PATH = Path(__file__).with_name("seed_state.json")
@@ -866,7 +866,7 @@ class MindMapNodePayload(BaseModel):
 app = FastAPI(
     title="Thing Planner WorkOS API",
     version=APP_VERSION,
-    description="v0.9.2 API startup hotfix + UI Cleanup + connected functional shell for Thing Planner WorkOS.",
+    description="v0.9.3 functional hardening: connected workspace shell, persistent UI actions, API/state sync, planner, docs, Gantt, forms, and visual collaboration.",
 )
 
 app.add_middleware(
@@ -906,7 +906,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> Opt
 def load_seed_state() -> Dict[str, Any]:
     with SEED_PATH.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    data["version"] = "0.9.0"
+    data["version"] = "0.9.3"
     return data
 
 
@@ -1332,12 +1332,28 @@ def parse_or_now(value: Optional[str]) -> datetime:
         return utc_now()
 
 
+def ensure_list_exists(conn, list_id: str) -> None:
+    """Ensure frontend-created project/list IDs have matching normalized rows before task upsert."""
+    if not list_id:
+        return
+    if conn.execute(select(lists.c.id).where(lists.c.id == list_id)).first():
+        return
+    space_id = "s_frontend"
+    folder_id = "f_frontend"
+    if not conn.execute(select(spaces.c.id).where(spaces.c.id == space_id)).first():
+        conn.execute(spaces.insert().values(id=space_id, workspace_id=DEFAULT_WORKSPACE_ID, name="Frontend-created Space", icon="👥", is_private=False, sort_order=999))
+    if not conn.execute(select(folders.c.id).where(folders.c.id == folder_id)).first():
+        conn.execute(folders.insert().values(id=folder_id, space_id=space_id, name="Projects", icon="📁", sort_order=999))
+    conn.execute(lists.insert().values(id=list_id, folder_id=folder_id, name=list_id, icon="☑", kind="project", sort_order=999))
+
 def upsert_task_row(conn, task: Dict[str, Any], actor: Optional[str] = None, log: bool = True) -> None:
     task_id = task.get("id") or make_id("t")
+    list_id = task.get("projectId") or task.get("list_id") or "p1"
+    ensure_list_exists(conn, list_id)
     values = {
         "id": task_id,
         "workspace_id": DEFAULT_WORKSPACE_ID,
-        "list_id": task.get("projectId") or task.get("list_id") or "p1",
+        "list_id": list_id,
         "parent_task_id": task.get("parent_task_id"),
         "name": task.get("name", "Untitled task"),
         "assignee_id": task.get("assignee") or task.get("assignee_id"),
@@ -1434,9 +1450,9 @@ def serialize_state() -> Dict[str, Any]:
         "selectedProject": "p1",
         "selectedWhiteboard": "wb1",
         "visualTab": "whiteboard",
-        "helper": True,
-        "aiPromo": True,
-        "version": "0.9.0",
+        "helper": False,
+        "aiPromo": False,
+        "version": "0.9.3",
         "workspace": {"name": workspace["name"], "initials": workspace["initials"]},
         "members": [
             {"id": r.id, "name": r.display_name, "initials": r.initials, "avatar": r.avatar, "role": r.role}
@@ -1560,10 +1576,131 @@ def sync_whiteboards_from_state(conn, boards: List[Dict[str, Any]], actor: Optio
             ))
     log_event(conn, "whiteboards.synced", "workspace", DEFAULT_WORKSPACE_ID, "Synchronized frontend whiteboard state", actor, {"board_count": len(boards)})
 
+def sync_members_from_state(conn, member_state: List[Dict[str, Any]]) -> None:
+    if not isinstance(member_state, list):
+        return
+    for member in member_state:
+        user_id = member.get("id") or make_id("u")
+        values = {
+            "id": user_id,
+            "email": "echofoxx@gmail.com" if user_id == DEFAULT_OWNER_ID else f"{user_id}@example.local",
+            "display_name": member.get("name") or member.get("display_name") or user_id.title(),
+            "initials": member.get("initials") or user_id[:2].upper(),
+            "avatar": member.get("avatar") or "purple",
+            "title": member.get("role") or member.get("title") or "Member",
+            "password_hash": hash_password("thingplanner" if user_id == DEFAULT_OWNER_ID else "demo"),
+            "created_at": utc_now(),
+        }
+        if conn.execute(select(users.c.id).where(users.c.id == user_id)).first():
+            conn.execute(users.update().where(users.c.id == user_id).values(display_name=values["display_name"], initials=values["initials"], avatar=values["avatar"], title=values["title"]))
+        else:
+            conn.execute(users.insert().values(**values))
+        if conn.execute(select(workspace_members.c.user_id).where((workspace_members.c.workspace_id == DEFAULT_WORKSPACE_ID) & (workspace_members.c.user_id == user_id))).first():
+            conn.execute(workspace_members.update().where((workspace_members.c.workspace_id == DEFAULT_WORKSPACE_ID) & (workspace_members.c.user_id == user_id)).values(role=values["title"], permissions=default_permissions(values["title"])))
+        else:
+            conn.execute(workspace_members.insert().values(workspace_id=DEFAULT_WORKSPACE_ID, user_id=user_id, role=values["title"], permissions=default_permissions(values["title"]), created_at=utc_now()))
+
+
+def sync_spaces_from_state(conn, space_state: List[Dict[str, Any]]) -> None:
+    if not isinstance(space_state, list):
+        return
+    for s_order, space in enumerate(space_state):
+        sid = space.get("id") or make_id("s")
+        if conn.execute(select(spaces.c.id).where(spaces.c.id == sid)).first():
+            conn.execute(spaces.update().where(spaces.c.id == sid).values(name=space.get("name", "Space"), icon=space.get("icon", "👥"), sort_order=s_order))
+        else:
+            conn.execute(spaces.insert().values(id=sid, workspace_id=DEFAULT_WORKSPACE_ID, name=space.get("name", "Space"), icon=space.get("icon", "👥"), is_private=bool(space.get("private", False)), sort_order=s_order))
+        for f_order, folder in enumerate(space.get("folders", []) or []):
+            fid = folder.get("id") or make_id("f")
+            if conn.execute(select(folders.c.id).where(folders.c.id == fid)).first():
+                conn.execute(folders.update().where(folders.c.id == fid).values(space_id=sid, name=folder.get("name", "Folder"), icon=folder.get("icon", "📁"), sort_order=f_order))
+            else:
+                conn.execute(folders.insert().values(id=fid, space_id=sid, name=folder.get("name", "Folder"), icon=folder.get("icon", "📁"), sort_order=f_order))
+            for l_order, item in enumerate(folder.get("lists", []) or []):
+                lid = item.get("id") or make_id("p")
+                if conn.execute(select(lists.c.id).where(lists.c.id == lid)).first():
+                    conn.execute(lists.update().where(lists.c.id == lid).values(folder_id=fid, name=item.get("name", "List"), icon=item.get("icon", "☑"), kind=item.get("kind", "project"), sort_order=l_order))
+                else:
+                    conn.execute(lists.insert().values(id=lid, folder_id=fid, name=item.get("name", "List"), icon=item.get("icon", "☑"), kind=item.get("kind", "project"), sort_order=l_order))
+
+
+def sync_dashboards_from_state(conn, dashboard_state: List[Dict[str, Any]]) -> None:
+    if not isinstance(dashboard_state, list):
+        return
+    for dash in dashboard_state:
+        did = dash.get("id") or make_id("d")
+        values = {"workspace_id": DEFAULT_WORKSPACE_ID, "name": dash.get("name", "Dashboard"), "is_private": bool(dash.get("private", False)), "favorite": bool(dash.get("favorite", False)), "config": dash.get("config", {}) or {}}
+        if conn.execute(select(dashboards.c.id).where(dashboards.c.id == did)).first():
+            conn.execute(dashboards.update().where(dashboards.c.id == did).values(**values))
+        else:
+            conn.execute(dashboards.insert().values(id=did, **values))
+
+
+def sync_goals_from_state(conn, goal_state: List[Dict[str, Any]]) -> None:
+    if not isinstance(goal_state, list):
+        return
+    for goal in goal_state:
+        gid = goal.get("id") or make_id("g")
+        values = {"workspace_id": DEFAULT_WORKSPACE_ID, "name": goal.get("name", "Goal"), "owner": goal.get("owner", "Adrian Francis"), "progress": int(goal.get("progress") or 0), "status": goal.get("status", "On Track")}
+        if conn.execute(select(goals.c.id).where(goals.c.id == gid)).first():
+            conn.execute(goals.update().where(goals.c.id == gid).values(**values))
+        else:
+            conn.execute(goals.insert().values(id=gid, **values))
+
+
+def sync_forms_from_state(conn, form_state: List[Dict[str, Any]], submission_state: List[Dict[str, Any]]) -> None:
+    if isinstance(form_state, list):
+        for form in form_state:
+            fid = form.get("id") or make_id("form")
+            values = {"workspace_id": DEFAULT_WORKSPACE_ID, "name": form.get("name", "Form"), "description": form.get("description", ""), "submissions": int(form.get("submissions") or 0), "favorite": bool(form.get("favorite", False)), "schema": form.get("schema", {}) or {}}
+            if conn.execute(select(forms.c.id).where(forms.c.id == fid)).first():
+                conn.execute(forms.update().where(forms.c.id == fid).values(**values))
+            else:
+                conn.execute(forms.insert().values(id=fid, **values))
+    if isinstance(submission_state, list):
+        for sub in submission_state:
+            fid = sub.get("formId") or sub.get("form_id") or "form1"
+            if not conn.execute(select(forms.c.id).where(forms.c.id == fid)).first():
+                conn.execute(forms.insert().values(id=fid, workspace_id=DEFAULT_WORKSPACE_ID, name="Imported Form", description="", submissions=0, favorite=False, schema={}))
+            sid = sub.get("id") or make_id("sub")
+            values = {"form_id": fid, "workspace_id": DEFAULT_WORKSPACE_ID, "requester": sub.get("requester", "Adrian Francis"), "department": sub.get("department", "Product"), "priority": sub.get("priority", "Normal"), "payload": sub.get("payload", {}) or {}, "ai_analysis": sub.get("aiAnalysis", {}) or sub.get("ai_analysis", {}) or {}, "created_task_id": sub.get("createdTaskId") or sub.get("created_task_id"), "status": sub.get("status", "Processed"), "created_at": parse_or_now(sub.get("createdAt") or sub.get("created_at"))}
+            if conn.execute(select(form_submissions.c.id).where(form_submissions.c.id == sid)).first():
+                conn.execute(form_submissions.update().where(form_submissions.c.id == sid).values(**values))
+            else:
+                conn.execute(form_submissions.insert().values(id=sid, **values))
+
+
+def sync_automations_from_state(conn, automation_state: List[Dict[str, Any]], run_state: List[Dict[str, Any]]) -> None:
+    if isinstance(automation_state, list):
+        for auto in automation_state:
+            aid = auto.get("id") or make_id("auto")
+            values = {"workspace_id": DEFAULT_WORKSPACE_ID, "name": auto.get("name", "Automation"), "category": auto.get("category", "Automate Projects"), "trigger": auto.get("trigger", "manual"), "action": auto.get("action", "Record run"), "enabled": bool(auto.get("enabled", True))}
+            if conn.execute(select(automations.c.id).where(automations.c.id == aid)).first():
+                conn.execute(automations.update().where(automations.c.id == aid).values(**values))
+            else:
+                conn.execute(automations.insert().values(id=aid, **values))
+    if isinstance(run_state, list):
+        for run in run_state[:50]:
+            rid = run.get("id") or make_id("run")
+            aid = run.get("automationId") or run.get("automation_id")
+            if aid and not conn.execute(select(automations.c.id).where(automations.c.id == aid)).first():
+                conn.execute(automations.insert().values(id=aid, workspace_id=DEFAULT_WORKSPACE_ID, name=aid.replace("_", " ").title(), category="Imported", trigger=run.get("trigger", "manual"), action="Imported from frontend state", enabled=True))
+            values = {"automation_id": aid, "workspace_id": DEFAULT_WORKSPACE_ID, "trigger": run.get("trigger", "manual"), "source_type": run.get("sourceType") or run.get("source_type") or "workspace", "source_id": run.get("sourceId") or run.get("source_id") or DEFAULT_WORKSPACE_ID, "status": run.get("status", "success"), "summary": run.get("summary", "Automation run"), "details": run.get("details", {}) or {}, "created_at": parse_or_now(run.get("createdAt") or run.get("created_at"))}
+            if conn.execute(select(automation_runs.c.id).where(automation_runs.c.id == rid)).first():
+                conn.execute(automation_runs.update().where(automation_runs.c.id == rid).values(**values))
+            else:
+                conn.execute(automation_runs.insert().values(id=rid, **values))
+
 def apply_state_to_normalized_tables(state: Dict[str, Any], actor: Optional[str] = None) -> None:
     with engine.begin() as conn:
         if "workspace" in state:
             conn.execute(workspaces.update().where(workspaces.c.id == DEFAULT_WORKSPACE_ID).values(name=state["workspace"].get("name", "Workspace"), initials=state["workspace"].get("initials", "W")))
+        sync_members_from_state(conn, state.get("members", []))
+        sync_spaces_from_state(conn, state.get("spaces", []))
+        sync_dashboards_from_state(conn, state.get("dashboards", []))
+        sync_goals_from_state(conn, state.get("goals", []))
+        sync_forms_from_state(conn, state.get("forms", []), state.get("formSubmissions", []))
+        sync_automations_from_state(conn, state.get("automations", []), state.get("automationRuns", []))
         for task in state.get("tasks", []):
             upsert_task_row(conn, task, actor=actor, log=False)
             conn.execute(delete(task_comments).where(task_comments.c.task_id == task.get("id")))

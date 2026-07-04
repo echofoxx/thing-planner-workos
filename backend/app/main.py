@@ -34,7 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 
-APP_VERSION = "v0.6.0"
+APP_VERSION = "v0.7.0"
 DEFAULT_WORKSPACE_ID = "w1"
 DEFAULT_OWNER_ID = "adrian"
 SEED_PATH = Path(__file__).with_name("seed_state.json")
@@ -348,6 +348,47 @@ planner_preferences = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
+
+task_dependencies = Table(
+    "task_dependencies",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("predecessor_task_id", String(64), ForeignKey("tasks.id"), nullable=False),
+    Column("successor_task_id", String(64), ForeignKey("tasks.id"), nullable=False),
+    Column("dependency_type", String(32), nullable=False, default="FS"),
+    Column("lag_days", Integer, nullable=False, default=0),
+    Column("critical", Boolean, nullable=False, default=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("predecessor_task_id", "successor_task_id", name="uq_task_dependency_pair"),
+)
+
+gantt_baselines = Table(
+    "gantt_baselines",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("list_id", String(64), ForeignKey("lists.id"), nullable=False),
+    Column("name", String(255), nullable=False),
+    Column("task_snapshots", JSON, nullable=False, default=list),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+gantt_risk_alerts = Table(
+    "gantt_risk_alerts",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("list_id", String(64), ForeignKey("lists.id"), nullable=False),
+    Column("task_id", String(64), ForeignKey("tasks.id"), nullable=True),
+    Column("level", String(32), nullable=False, default="medium"),
+    Column("title", String(500), nullable=False),
+    Column("recommendation", Text, nullable=False, default=""),
+    Column("metadata_json", JSON, nullable=False, default=dict),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
 activity_logs = Table(
     "activity_logs",
     metadata,
@@ -580,10 +621,31 @@ class FocusBlockPayload(BaseModel):
     reason: str = "Protected focus time"
 
 
+class GanttDependencyPayload(BaseModel):
+    predecessor_task_id: str
+    successor_task_id: str
+    dependency_type: str = "FS"
+    lag_days: int = 0
+    critical: bool = False
+
+
+class GanttSchedulePayload(BaseModel):
+    start: Optional[str] = None
+    due: Optional[str] = None
+    duration: Optional[int] = None
+    cascade: bool = True
+    reason: str = "Manual Gantt schedule update"
+
+
+class GanttBaselinePayload(BaseModel):
+    project_id: str = "p1"
+    name: str = "Baseline"
+
+
 app = FastAPI(
     title="Thing Planner WorkOS API",
     version=APP_VERSION,
-    description="v0.6 planner, AI scheduling engine, calendar events, time blocks, normalized data, reporting, forms, automations, and demo auth for Thing Planner WorkOS.",
+    description="v0.7 Gantt, dependencies, critical path, delay propagation, planner scheduling, reporting, forms, automations, normalized data, and demo auth for Thing Planner WorkOS.",
 )
 
 app.add_middleware(
@@ -601,6 +663,7 @@ def startup() -> None:
     ensure_seed_data()
     ensure_default_report_cards()
     ensure_default_planner_data()
+    ensure_default_gantt_data()
 
 
 def get_current_user(authorization: Optional[str] = Header(default=None)) -> Optional[Dict[str, Any]]:
@@ -620,7 +683,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> Opt
 def load_seed_state() -> Dict[str, Any]:
     with SEED_PATH.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    data["version"] = "0.6.0"
+    data["version"] = "0.7.0"
     return data
 
 
@@ -771,7 +834,7 @@ def ensure_seed_data() -> None:
             if not exists:
                 conn.execute(automations.insert().values(workspace_id=DEFAULT_WORKSPACE_ID, enabled=True, **auto))
         seed_custom_fields(conn)
-        log_event(conn, "seed", "workspace", DEFAULT_WORKSPACE_ID, "Seeded normalized v0.6.0 planner scheduling workspace", DEFAULT_OWNER_ID, {"version": APP_VERSION})
+        log_event(conn, "seed", "workspace", DEFAULT_WORKSPACE_ID, "Seeded normalized v0.7.0 Gantt dependency workspace", DEFAULT_OWNER_ID, {"version": APP_VERSION})
 
 
 def ensure_default_planner_data() -> None:
@@ -931,6 +994,9 @@ def serialize_state() -> Dict[str, Any]:
         calendar_event_rows = conn.execute(select(calendar_events).where(calendar_events.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(calendar_events.c.start_at)).all()
         planner_block_rows = conn.execute(select(planner_blocks).where(planner_blocks.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(planner_blocks.c.start_at)).all()
         pref_row = conn.execute(select(planner_preferences).where(planner_preferences.c.workspace_id == DEFAULT_WORKSPACE_ID)).first()
+        dependency_rows = conn.execute(select(task_dependencies).where(task_dependencies.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+        baseline_rows = conn.execute(select(gantt_baselines).where(gantt_baselines.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(gantt_baselines.c.created_at.desc()).limit(10)).all()
+        gantt_alert_rows = conn.execute(select(gantt_risk_alerts).where(gantt_risk_alerts.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(gantt_risk_alerts.c.created_at.desc()).limit(20)).all()
 
     comments_by_task: Dict[str, List[Dict[str, Any]]] = {}
     for c in comment_rows:
@@ -954,7 +1020,7 @@ def serialize_state() -> Dict[str, Any]:
         "selectedProject": "p1",
         "helper": True,
         "aiPromo": True,
-        "version": "0.6.0",
+        "version": "0.7.0",
         "workspace": {"name": workspace["name"], "initials": workspace["initials"]},
         "members": [
             {"id": r.id, "name": r.display_name, "initials": r.initials, "avatar": r.avatar, "role": r.role}
@@ -1001,6 +1067,9 @@ def serialize_state() -> Dict[str, Any]:
         "calendarEvents": [{"id": r.id, "title": r.title, "kind": r.kind, "startAt": r.start_at, "endAt": r.end_at, "source": r.source, "taskId": r.task_id, "ownerId": r.owner_id, "color": r.color, "metadata": r.metadata_json or {}} for r in calendar_event_rows],
         "plannerBlocks": [{"id": r.id, "taskId": r.task_id, "title": r.title, "ownerId": r.owner_id, "startAt": r.start_at, "endAt": r.end_at, "blockType": r.block_type, "status": r.status, "score": r.score, "reason": r.reason} for r in planner_block_rows],
         "plannerPreferences": dict(pref_row._mapping) if pref_row else {"workspace_id": DEFAULT_WORKSPACE_ID, "workday_start": "08:30", "workday_end": "17:00", "lunch_start": "12:00", "lunch_end": "13:00", "focus_block_minutes": 90, "auto_schedule_blocked": False},
+        "taskDependencies": [serialize_dependency(r) for r in dependency_rows],
+        "ganttBaselines": [{"id": r.id, "projectId": r.list_id, "name": r.name, "taskSnapshots": r.task_snapshots or [], "createdAt": r.created_at.isoformat()} for r in baseline_rows],
+        "ganttRiskAlerts": [{"id": r.id, "projectId": r.list_id, "taskId": r.task_id, "level": r.level, "title": r.title, "recommendation": r.recommendation, "metadata": r.metadata_json or {}, "createdAt": r.created_at.isoformat()} for r in gantt_alert_rows],
     }
 
 
@@ -1048,6 +1117,9 @@ def health() -> Dict[str, Any]:
                 "automation_runs": conn.execute(select(func.count()).select_from(automation_runs)).scalar_one(),
                 "calendar_events": conn.execute(select(func.count()).select_from(calendar_events)).scalar_one(),
                 "planner_blocks": conn.execute(select(func.count()).select_from(planner_blocks)).scalar_one(),
+                "task_dependencies": conn.execute(select(func.count()).select_from(task_dependencies)).scalar_one(),
+                "gantt_baselines": conn.execute(select(func.count()).select_from(gantt_baselines)).scalar_one(),
+                "gantt_risk_alerts": conn.execute(select(func.count()).select_from(gantt_risk_alerts)).scalar_one(),
             }
         db_ok = True
     except SQLAlchemyError:
@@ -1057,7 +1129,7 @@ def health() -> Dict[str, Any]:
         "status": "ok" if db_ok else "degraded",
         "version": APP_VERSION,
         "database": engine.dialect.name,
-        "schema": "planner-scheduling-v0.6",
+        "schema": "gantt-dependency-v0.7",
         "auth": "enabled",
         "workspace_id": DEFAULT_WORKSPACE_ID,
         "tables": table_counts,
@@ -1100,9 +1172,9 @@ def api_schema() -> Dict[str, Any]:
             "users", "workspaces", "workspace_members", "spaces", "folders", "lists", "task_statuses", "tasks",
             "task_comments", "custom_fields", "custom_field_values", "notifications", "dashboards", "forms",
             "docs", "goals", "automations", "automation_runs", "activity_logs", "sessions", "report_cards", "form_submissions",
-            "calendar_events", "planner_blocks", "planner_preferences",
+            "calendar_events", "planner_blocks", "planner_preferences", "task_dependencies", "gantt_baselines", "gantt_risk_alerts",
         ],
-        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1-v0.6 frontend state shape. v0.6 adds planner/calendar scheduling endpoints, AI schedule generation, time blocks, report APIs, form submission APIs, and automation run APIs.",
+        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1-v0.7 frontend state shape. v0.7 adds Gantt/dependency/critical path endpoints, delay propagation, baselines, and schedule risk alerts on top of planner, reporting, forms, automations, and auth.",
     }
 
 
@@ -1818,7 +1890,7 @@ def compute_report_dataset(filters: Optional[Dict[str, Any]] = None) -> Dict[str
     completion = round((len(done) / len(filtered)) * 100) if filtered else 0
     utilization = round((tracked_hours / estimate_hours) * 100) if estimate_hours else 0
     return {
-        "schema": "planner-scheduling-v0.6",
+        "schema": "gantt-dependency-v0.7",
         "generated_at": utc_now().isoformat(),
         "filters": filters or {},
         "summary": {
@@ -1938,6 +2010,318 @@ def api_report_action(payload: ReportActionPayload, current_user: Optional[Dict[
     return {"ok": True, "state": serialize_state(), "dataset": compute_report_dataset()}
 
 
+
+# v0.7 Gantt + Dependency / Critical Path Engine
+
+def parse_date_only(value: Optional[str]) -> datetime:
+    if not value:
+        return utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    text_value = str(value)[:10]
+    try:
+        return datetime.fromisoformat(text_value).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def date_only(value: datetime) -> str:
+    return value.date().isoformat()
+
+
+def task_finish_date(row: Any) -> datetime:
+    start = parse_date_only(getattr(row, "start", None) or getattr(row, "due", None))
+    duration = max(1, int(getattr(row, "duration", 1) or 1))
+    return start + timedelta(days=duration)
+
+
+def serialize_dependency(row: Any) -> Dict[str, Any]:
+    r = row._mapping if hasattr(row, "_mapping") else row
+    return {
+        "id": r["id"],
+        "predecessorId": r["predecessor_task_id"],
+        "successorId": r["successor_task_id"],
+        "type": r["dependency_type"],
+        "lagDays": r["lag_days"],
+        "critical": bool(r["critical"]),
+        "createdAt": r["created_at"].isoformat() if hasattr(r["created_at"], "isoformat") else str(r["created_at"]),
+    }
+
+
+def ensure_default_gantt_data() -> None:
+    """Seed dependency links, a baseline, and an automation for v0.7 Gantt demos."""
+    metadata.create_all(engine)
+    default_dependencies = [
+        ("dep_t1_t4", "t1", "t4", "FS", 0, False),
+        ("dep_t2_t5", "t2", "t5", "FS", 1, True),
+        ("dep_t4_t5", "t4", "t5", "FS", 0, True),
+        ("dep_t5_t3", "t5", "t3", "FS", 0, True),
+        ("dep_t7_t8", "t7", "t8", "FS", 0, False),
+    ]
+    with engine.begin() as conn:
+        for dep_id, pred, succ, dep_type, lag, is_critical in default_dependencies:
+            exists = conn.execute(select(task_dependencies.c.id).where(task_dependencies.c.id == dep_id)).first()
+            if not exists:
+                pred_exists = conn.execute(select(tasks.c.id).where(tasks.c.id == pred)).first()
+                succ_exists = conn.execute(select(tasks.c.id).where(tasks.c.id == succ)).first()
+                if pred_exists and succ_exists:
+                    conn.execute(task_dependencies.insert().values(
+                        id=dep_id, workspace_id=DEFAULT_WORKSPACE_ID, predecessor_task_id=pred,
+                        successor_task_id=succ, dependency_type=dep_type, lag_days=lag,
+                        critical=is_critical, created_at=utc_now(), updated_at=utc_now(),
+                    ))
+        auto_exists = conn.execute(select(automations.c.id).where(automations.c.id == "auto_gantt_delay_watch")).first()
+        if not auto_exists:
+            conn.execute(automations.insert().values(
+                id="auto_gantt_delay_watch", workspace_id=DEFAULT_WORKSPACE_ID,
+                name="AI Gantt delay watch", category="Automate Scheduling", enabled=True,
+                trigger="Dependency or due date changes", action="Recalculate critical path, flag conflicts, and suggest schedule recovery",
+            ))
+        for list_id, baseline_id in [("p1", "baseline_p1_v070"), ("p2", "baseline_p2_v070")]:
+            exists = conn.execute(select(gantt_baselines.c.id).where(gantt_baselines.c.id == baseline_id)).first()
+            if not exists:
+                task_rows = conn.execute(select(tasks).where(tasks.c.list_id == list_id).order_by(tasks.c.start, tasks.c.due)).all()
+                snapshots = [{"taskId": r.id, "name": r.name, "start": r.start, "due": r.due, "duration": r.duration, "status": r.status} for r in task_rows]
+                conn.execute(gantt_baselines.insert().values(
+                    id=baseline_id, workspace_id=DEFAULT_WORKSPACE_ID, list_id=list_id,
+                    name="Initial v0.7 baseline", task_snapshots=snapshots, created_at=utc_now(),
+                ))
+
+
+def compute_critical_path(task_rows: List[Any], dep_rows: List[Any]) -> List[str]:
+    task_by_id = {r.id: r for r in task_rows}
+    successors: Dict[str, List[str]] = {tid: [] for tid in task_by_id}
+    for dep in dep_rows:
+        if dep.predecessor_task_id in task_by_id and dep.successor_task_id in task_by_id:
+            successors.setdefault(dep.predecessor_task_id, []).append(dep.successor_task_id)
+    memo: Dict[str, tuple] = {}
+    visiting: set = set()
+    def best_chain(task_id: str):
+        if task_id in memo:
+            return memo[task_id]
+        if task_id in visiting:
+            return (0, [task_id])
+        visiting.add(task_id)
+        row = task_by_id[task_id]
+        duration = max(1, int(row.duration or 1))
+        best_len = duration
+        best_path = [task_id]
+        for succ in successors.get(task_id, []):
+            succ_len, succ_path = best_chain(succ)
+            if duration + succ_len > best_len:
+                best_len = duration + succ_len
+                best_path = [task_id] + succ_path
+        visiting.discard(task_id)
+        memo[task_id] = (best_len, best_path)
+        return memo[task_id]
+    best = (0, [])
+    for task_id in task_by_id:
+        chain = best_chain(task_id)
+        if chain[0] > best[0]:
+            best = chain
+    explicit = [r.id for r in task_rows if bool(r.critical)]
+    return list(dict.fromkeys(best[1] + explicit))
+
+
+def compute_gantt_dataset(project_id: str = "p1", persist_alerts: bool = False) -> Dict[str, Any]:
+    ensure_default_gantt_data()
+    with engine.begin() as conn:
+        task_rows = conn.execute(select(tasks).where(tasks.c.list_id == project_id).order_by(tasks.c.start, tasks.c.due, tasks.c.name)).all()
+        task_ids = [r.id for r in task_rows]
+        dep_rows = []
+        if task_ids:
+            all_deps = conn.execute(select(task_dependencies).where(task_dependencies.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+            dep_rows = [d for d in all_deps if d.predecessor_task_id in task_ids and d.successor_task_id in task_ids]
+        baselines = conn.execute(select(gantt_baselines).where(gantt_baselines.c.list_id == project_id).order_by(gantt_baselines.c.created_at.desc())).all()
+        critical_path = compute_critical_path(task_rows, dep_rows)
+        task_by_id = {r.id: r for r in task_rows}
+        earliest = min([parse_date_only(r.start or r.due) for r in task_rows], default=parse_date_only(None))
+        latest = max([task_finish_date(r) for r in task_rows], default=earliest + timedelta(days=7))
+        today = utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+        risks: List[Dict[str, Any]] = []
+        conflict_count = 0
+        for dep in dep_rows:
+            pred = task_by_id.get(dep.predecessor_task_id)
+            succ = task_by_id.get(dep.successor_task_id)
+            if pred and succ:
+                required_start = task_finish_date(pred) + timedelta(days=int(dep.lag_days or 0))
+                actual_start = parse_date_only(succ.start or succ.due)
+                if actual_start < required_start and succ.status != "DONE":
+                    conflict_count += 1
+                    risks.append({
+                        "level": "high" if dep.critical or succ.id in critical_path else "medium",
+                        "taskId": succ.id,
+                        "title": f"Dependency conflict: {succ.name} starts before {pred.name} can finish",
+                        "recommendation": f"Move {succ.name} to {date_only(required_start)} or reduce predecessor duration.",
+                        "metadata": {"dependencyId": dep.id, "requiredStart": date_only(required_start), "actualStart": date_only(actual_start)},
+                    })
+        for row in task_rows:
+            start = parse_date_only(row.start or row.due)
+            finish = task_finish_date(row)
+            if row.status == "BLOCKED" and row.id in critical_path:
+                risks.append({"level": "high", "taskId": row.id, "title": f"Critical path task is blocked: {row.name}", "recommendation": "Escalate blocker, assign recovery owner, and re-run dependency cascade.", "metadata": {"status": row.status}})
+            if row.status != "DONE" and row.due and parse_date_only(row.due) < today:
+                risks.append({"level": "high", "taskId": row.id, "title": f"Overdue task threatens schedule: {row.name}", "recommendation": "Update due date, mark blocked, or schedule recovery work in Planner.", "metadata": {"due": row.due}})
+            if row.status != "DONE" and row.id in critical_path and row.progress < 50 and (parse_date_only(row.due or date_only(finish)) - today).days <= 3:
+                risks.append({"level": "medium", "taskId": row.id, "title": f"Low progress on near-term critical task: {row.name}", "recommendation": "Add focused work block or split remaining work into subtasks.", "metadata": {"progress": row.progress, "due": row.due}})
+        if persist_alerts:
+            conn.execute(delete(gantt_risk_alerts).where(gantt_risk_alerts.c.list_id == project_id))
+            for risk in risks[:20]:
+                conn.execute(gantt_risk_alerts.insert().values(
+                    id=make_id("gr"), workspace_id=DEFAULT_WORKSPACE_ID, list_id=project_id,
+                    task_id=risk.get("taskId"), level=risk.get("level", "medium"),
+                    title=risk.get("title", "Schedule risk"), recommendation=risk.get("recommendation", ""),
+                    metadata_json=risk.get("metadata", {}), created_at=utc_now(),
+                ))
+        dependencies_by_task = {tid: {"predecessors": [], "successors": []} for tid in task_ids}
+        for dep in dep_rows:
+            dependencies_by_task.setdefault(dep.predecessor_task_id, {"predecessors": [], "successors": []})["successors"].append(dep.successor_task_id)
+            dependencies_by_task.setdefault(dep.successor_task_id, {"predecessors": [], "successors": []})["predecessors"].append(dep.predecessor_task_id)
+        serialized_tasks = []
+        total_days = max(1, (latest - earliest).days + 1)
+        for row in task_rows:
+            start = parse_date_only(row.start or row.due)
+            finish = task_finish_date(row)
+            serialized_tasks.append({
+                "id": row.id, "projectId": row.list_id, "name": row.name, "assignee": row.assignee_id,
+                "status": row.status, "priority": row.priority, "start": date_only(start), "due": row.due,
+                "end": date_only(finish), "duration": int(row.duration or 1), "progress": int(row.progress or 0),
+                "critical": bool(row.critical) or row.id in critical_path,
+                "criticalPath": row.id in critical_path,
+                "blocked": row.status == "BLOCKED",
+                "predecessors": dependencies_by_task.get(row.id, {}).get("predecessors", []),
+                "successors": dependencies_by_task.get(row.id, {}).get("successors", []),
+                "offsetDays": max(0, (start - earliest).days),
+                "widthDays": max(1, (finish - start).days),
+                "timelineDays": total_days,
+            })
+        return {
+            "ok": True,
+            "projectId": project_id,
+            "timeline": {"start": date_only(earliest), "end": date_only(latest), "days": total_days},
+            "tasks": serialized_tasks,
+            "dependencies": [serialize_dependency(d) for d in dep_rows],
+            "criticalPath": critical_path,
+            "risks": risks,
+            "baselines": [{"id": r.id, "projectId": r.list_id, "name": r.name, "taskSnapshots": r.task_snapshots or [], "createdAt": r.created_at.isoformat()} for r in baselines],
+            "metrics": {
+                "taskCount": len(task_rows), "dependencyCount": len(dep_rows), "criticalTasks": len(critical_path),
+                "riskCount": len(risks), "conflictCount": conflict_count, "endDate": date_only(latest),
+                "blockedCritical": len([r for r in task_rows if r.status == "BLOCKED" and r.id in critical_path]),
+            },
+        }
+
+
+def cascade_successor_dates(conn, task_id: str, visited: Optional[set] = None) -> int:
+    visited = visited or set()
+    if task_id in visited:
+        return 0
+    visited.add(task_id)
+    changed = 0
+    deps = conn.execute(select(task_dependencies).where(task_dependencies.c.predecessor_task_id == task_id)).all()
+    for dep in deps:
+        pred = conn.execute(select(tasks).where(tasks.c.id == dep.predecessor_task_id)).first()
+        succ = conn.execute(select(tasks).where(tasks.c.id == dep.successor_task_id)).first()
+        if not pred or not succ:
+            continue
+        required_start = task_finish_date(pred) + timedelta(days=int(dep.lag_days or 0))
+        actual_start = parse_date_only(succ.start or succ.due)
+        if actual_start < required_start:
+            duration = max(1, int(succ.duration or 1))
+            new_due = required_start + timedelta(days=duration)
+            conn.execute(tasks.update().where(tasks.c.id == succ.id).values(start=date_only(required_start), due=date_only(new_due), updated_at=utc_now()))
+            changed += 1 + cascade_successor_dates(conn, succ.id, visited)
+    return changed
+
+
+@app.get("/api/gantt")
+def api_gantt(project_id: str = "p1", persist_alerts: bool = True) -> Dict[str, Any]:
+    return compute_gantt_dataset(project_id, persist_alerts=persist_alerts)
+
+
+@app.get("/api/gantt/critical-path")
+def api_gantt_critical_path(project_id: str = "p1") -> Dict[str, Any]:
+    data = compute_gantt_dataset(project_id, persist_alerts=False)
+    return {"projectId": project_id, "criticalPath": data["criticalPath"], "tasks": [t for t in data["tasks"] if t["criticalPath"]], "metrics": data["metrics"], "risks": data["risks"]}
+
+
+@app.post("/api/gantt/dependencies")
+def api_create_dependency(payload: GanttDependencyPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    if payload.predecessor_task_id == payload.successor_task_id:
+        raise HTTPException(status_code=400, detail="A task cannot depend on itself")
+    dep_id = make_id("dep")
+    with engine.begin() as conn:
+        pred = conn.execute(select(tasks).where(tasks.c.id == payload.predecessor_task_id)).first()
+        succ = conn.execute(select(tasks).where(tasks.c.id == payload.successor_task_id)).first()
+        if not pred or not succ:
+            raise HTTPException(status_code=404, detail="Predecessor or successor task not found")
+        existing = conn.execute(select(task_dependencies).where(task_dependencies.c.predecessor_task_id == payload.predecessor_task_id).where(task_dependencies.c.successor_task_id == payload.successor_task_id)).first()
+        if existing:
+            raise HTTPException(status_code=409, detail="Dependency already exists")
+        conn.execute(task_dependencies.insert().values(
+            id=dep_id, workspace_id=DEFAULT_WORKSPACE_ID,
+            predecessor_task_id=payload.predecessor_task_id, successor_task_id=payload.successor_task_id,
+            dependency_type=payload.dependency_type, lag_days=payload.lag_days, critical=payload.critical,
+            created_at=utc_now(), updated_at=utc_now(),
+        ))
+        log_event(conn, "gantt.dependency.created", "task_dependency", dep_id, f"Linked {pred.name} -> {succ.name}", actor, {"type": payload.dependency_type, "lag_days": payload.lag_days})
+    return compute_gantt_dataset(pred.list_id, persist_alerts=True)
+
+
+@app.delete("/api/gantt/dependencies/{dependency_id}")
+def api_delete_dependency(dependency_id: str, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        dep = conn.execute(select(task_dependencies).where(task_dependencies.c.id == dependency_id)).first()
+        if not dep:
+            raise HTTPException(status_code=404, detail=f"Dependency {dependency_id} not found")
+        succ = conn.execute(select(tasks).where(tasks.c.id == dep.successor_task_id)).first()
+        project_id = succ.list_id if succ else "p1"
+        conn.execute(delete(task_dependencies).where(task_dependencies.c.id == dependency_id))
+        log_event(conn, "gantt.dependency.deleted", "task_dependency", dependency_id, "Removed Gantt dependency", actor, {})
+    return compute_gantt_dataset(project_id, persist_alerts=True)
+
+
+@app.post("/api/gantt/tasks/{task_id}/schedule")
+def api_gantt_schedule_task(task_id: str, payload: GanttSchedulePayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        row = conn.execute(select(tasks).where(tasks.c.id == task_id)).first()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        duration = int(payload.duration or row.duration or 1)
+        start = parse_date_only(payload.start or row.start or row.due)
+        due = parse_date_only(payload.due) if payload.due else start + timedelta(days=duration)
+        conn.execute(tasks.update().where(tasks.c.id == task_id).values(start=date_only(start), due=date_only(due), duration=duration, updated_at=utc_now()))
+        cascaded = cascade_successor_dates(conn, task_id) if payload.cascade else 0
+        log_event(conn, "gantt.task.schedule", "task", task_id, f"Gantt schedule updated for task: {row.name}", actor, {"start": date_only(start), "due": date_only(due), "duration": duration, "cascade": payload.cascade, "cascaded": cascaded})
+        record_automation_run(conn, "auto_gantt_delay_watch", "Dependency schedule changed", "task", task_id, f"Recalculated Gantt and cascaded {cascaded} dependent task(s)", {"reason": payload.reason})
+    return compute_gantt_dataset(row.list_id, persist_alerts=True) | {"state": serialize_state()}
+
+
+@app.post("/api/gantt/recalculate")
+def api_gantt_recalculate(project_id: str = "p1", current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    data = compute_gantt_dataset(project_id, persist_alerts=True)
+    with engine.begin() as conn:
+        log_event(conn, "gantt.recalculated", "list", project_id, f"Recalculated critical path for {project_id}", actor, data.get("metrics", {}))
+        record_automation_run(conn, "auto_gantt_delay_watch", "Manual Gantt recalculation", "list", project_id, f"Found {data['metrics']['riskCount']} schedule risk(s) and {data['metrics']['conflictCount']} dependency conflict(s)", data.get("metrics", {}))
+    return data
+
+
+@app.post("/api/gantt/baselines")
+def api_create_gantt_baseline(payload: GanttBaselinePayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        task_rows = conn.execute(select(tasks).where(tasks.c.list_id == payload.project_id).order_by(tasks.c.start, tasks.c.due)).all()
+        if not task_rows:
+            raise HTTPException(status_code=404, detail=f"Project {payload.project_id} has no tasks")
+        baseline_id = make_id("base")
+        snapshots = [{"taskId": r.id, "name": r.name, "start": r.start, "due": r.due, "duration": r.duration, "status": r.status, "progress": r.progress} for r in task_rows]
+        conn.execute(gantt_baselines.insert().values(id=baseline_id, workspace_id=DEFAULT_WORKSPACE_ID, list_id=payload.project_id, name=payload.name, task_snapshots=snapshots, created_at=utc_now()))
+        log_event(conn, "gantt.baseline.created", "gantt_baseline", baseline_id, f"Created baseline {payload.name}", actor, {"project_id": payload.project_id, "tasks": len(snapshots)})
+    return compute_gantt_dataset(payload.project_id, persist_alerts=True)
+
+
 @app.post("/api/ai/project-summary")
 def api_ai_summary() -> Dict[str, Any]:
     state = serialize_state()
@@ -1947,14 +2331,14 @@ def api_ai_summary() -> Dict[str, Any]:
     due_soon = [t for t in task_list if t.get("status") != "DONE"][:4]
     health = "At Risk" if blocked or len(critical_open) >= 2 else "On Track"
     return {
-        "summary": "The workspace now includes a v0.4 reporting engine with server-side dashboard metrics, drill-down datasets, and report actions that update live work from dashboard cards.",
+        "summary": "The workspace now includes a v0.7 Gantt dependency engine with critical path detection, delay propagation, baselines, schedule risk alerts, and dependency-aware work planning.",
         "health": health,
         "blockers": [t.get("name") for t in blocked],
         "next_actions": [
             "Validate normalized table writes from List and Board views",
             "Move dashboard cards from derived frontend state to report endpoints",
             "Add real role enforcement for workspace members",
-            "Expand v0.6 planner with dependency-aware scheduling and Gantt updates",
+            "Use v0.7 Gantt critical path findings to reschedule dependent work",
         ],
         "sources": [t.get("name") for t in due_soon],
     }

@@ -4,7 +4,7 @@
   "selectedProject": "p1",
   "helper": true,
   "aiPromo": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "workspace": {
     "name": "Adrian Francis's Workspace",
     "initials": "A"
@@ -439,5 +439,49 @@
   "reportFilter": "all",
   "formSubmissions": [],
   "automationRuns": [],
-  "release": "v0.6.0"
+  "release": "v0.6.0",
+  "taskDependencies": [
+    {
+      "id": "dep_t1_t4",
+      "predecessorId": "t1",
+      "successorId": "t4",
+      "type": "FS",
+      "lagDays": 0,
+      "critical": false
+    },
+    {
+      "id": "dep_t2_t5",
+      "predecessorId": "t2",
+      "successorId": "t5",
+      "type": "FS",
+      "lagDays": 1,
+      "critical": true
+    },
+    {
+      "id": "dep_t4_t5",
+      "predecessorId": "t4",
+      "successorId": "t5",
+      "type": "FS",
+      "lagDays": 0,
+      "critical": true
+    },
+    {
+      "id": "dep_t5_t3",
+      "predecessorId": "t5",
+      "successorId": "t3",
+      "type": "FS",
+      "lagDays": 0,
+      "critical": true
+    },
+    {
+      "id": "dep_t7_t8",
+      "predecessorId": "t7",
+      "successorId": "t8",
+      "type": "FS",
+      "lagDays": 0,
+      "critical": false
+    }
+  ],
+  "ganttBaselines": [],
+  "ganttRiskAlerts": []
 }

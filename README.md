@@ -1,45 +1,54 @@
-# Thing Planner WorkOS v0.6.0
+# Thing Planner WorkOS v0.7.0
 
 **Thing Planner WorkOS** is an AI-native project management/work operating system prototype inspired by modern all-in-one productivity platforms. It includes a ClickUp-style workspace shell, tasks, boards, dashboards, reports, forms, automations, docs, planner, AI assistant, and a normalized API/data foundation.
 
-## v0.6.0 release theme
+## v0.7.0 release theme
 
-**Planner + AI Scheduling Engine**
+**Gantt + Dependency / Critical Path Engine**
 
-v0.6.0 makes the Planner operational. The app can generate a priority-based daily schedule from tasks, due dates, estimates, critical-path flags, calendar events, focus blocks, and working-hour preferences.
+v0.7.0 makes the Gantt view operational. The app now supports normalized task dependencies, critical-path calculation, schedule-risk analysis, baseline snapshots, and dependency-aware rescheduling/cascade logic.
 
-## What changed in v0.6.0
+## What changed in v0.7.0
 
-- New normalized planner database tables:
-  - `calendar_events`
-  - `planner_blocks`
-  - `planner_preferences`
-- New Planner API endpoints:
-  - `GET /api/planner`
-  - `POST /api/planner/plan-my-day`
-  - `GET /api/planner/events`
-  - `POST /api/planner/events`
-  - `POST /api/planner/tasks/{task_id}/schedule`
-  - `POST /api/planner/focus-blocks`
-  - `DELETE /api/planner/blocks/{block_id}`
-- AI daily scheduling engine:
-  - ranks work by priority, due date, critical path, blocked status, and progress
-  - creates AI-generated time blocks
-  - excludes blocked work unless preferences allow it
-  - respects working hours, lunch, existing meetings, and focus blocks
-  - creates risk warnings for overdue, blocked, or under-planned work
-- Planner UI upgrades:
-  - day selector and week strip
-  - Priority Queue with one-click scheduling
-  - Today timeline with meetings, focus, task blocks, and AI blocks
+- New normalized Gantt database tables:
+  - `task_dependencies`
+  - `gantt_baselines`
+  - `gantt_risk_alerts`
+- New Gantt API endpoints:
+  - `GET /api/gantt?project_id=p1`
+  - `GET /api/gantt/critical-path?project_id=p1`
+  - `POST /api/gantt/dependencies`
+  - `DELETE /api/gantt/dependencies/{dependency_id}`
+  - `POST /api/gantt/tasks/{task_id}/schedule`
+  - `POST /api/gantt/recalculate?project_id=p1`
+  - `POST /api/gantt/baselines`
+- Critical path engine:
+  - computes longest dependency chain
+  - includes explicitly marked critical tasks
+  - flags critical blocked work
+  - calculates timeline range and projected finish date
+- Delay and dependency analysis:
+  - detects successors scheduled before predecessor finish date
+  - accounts for lag days
+  - creates risk alerts for conflicts, overdue work, and blocked critical-path tasks
+  - stores risk alerts when Gantt is recalculated
+- Dependency-aware scheduling:
+  - reschedule task start/duration from the Gantt row
+  - optional cascade to dependent successors
+  - one-click `+1d` shift
+  - automation run history for schedule recalculation
+- Gantt UI upgrades:
+  - v0.7 Gantt command center
+  - Gantt KPI cards
+  - date-scaled task bars
+  - critical-path bar styling
+  - blocked task styling
+  - dependency editor
   - AI delay watch panel
-  - planner KPI cards
-  - Add focus block
-  - Add meeting
-  - Clear AI schedule
-  - API-backed planner sync with local fallback
-- More page data-layer cards now include schedule objects.
-- `/api/state` now serializes planner events, planner blocks, and planner preferences into the frontend state.
+  - baseline capture button
+  - API-backed sync with local fallback
+- `/api/state` now serializes dependencies, baselines, and Gantt risk alerts into the frontend state.
+- `/api/health` now reports Gantt table counts.
 
 ## What was already included
 
@@ -72,6 +81,12 @@ v0.6.0 makes the Planner operational. The app can generate a priority-based dail
   - connected Project Intake form
   - AI intake analysis stub
   - automatic task creation from form submissions
+- v0.6 planner/scheduling:
+  - calendar events
+  - planner blocks
+  - working-hour preferences
+  - AI daily schedule generation
+  - focus blocks and meetings
 
 ## Demo login
 
@@ -86,8 +101,8 @@ The frontend auto-runs demo auth when the API is available.
 
 ```powershell
 cd C:\docker
-Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.6.0.zip" "C:\docker\thing-planner-workos-v0.6.0"
-cd C:\docker\thing-planner-workos-v0.6.0\thing-planner-workos-v0.6.0
+Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.7.0.zip" "C:\docker\thing-planner-workos-v0.7.0"
+cd C:\docker\thing-planner-workos-v0.7.0\thing-planner-workos-v0.7.0
 docker compose up --build -d
 ```
 
@@ -117,7 +132,21 @@ Use this if you want a simpler local backend without PostgreSQL:
 docker compose -f docker-compose.sqlite.yml up --build -d
 ```
 
-## Key v0.6 Planner API endpoints
+## Key v0.7 Gantt API endpoints
+
+```text
+GET    /api/gantt
+GET    /api/gantt/critical-path
+POST   /api/gantt/dependencies
+DELETE /api/gantt/dependencies/{dependency_id}
+POST   /api/gantt/tasks/{task_id}/schedule
+POST   /api/gantt/recalculate
+POST   /api/gantt/baselines
+```
+
+## Existing API endpoints
+
+### Planner
 
 ```text
 GET    /api/planner
@@ -128,8 +157,6 @@ POST   /api/planner/tasks/{task_id}/schedule
 POST   /api/planner/focus-blocks
 DELETE /api/planner/blocks/{block_id}
 ```
-
-## Existing API endpoints
 
 ### Forms
 
@@ -171,11 +198,11 @@ Use your clean repo folder:
 cd C:\docker\thing-planner-workos-git
 ```
 
-Copy the v0.6.0 files into the repo:
+Copy the v0.7.0 files into the repo:
 
 ```powershell
 robocopy `
-  "C:\docker\thing-planner-workos-v0.6.0\thing-planner-workos-v0.6.0" `
+  "C:\docker\thing-planner-workos-v0.7.0\thing-planner-workos-v0.7.0" `
   "C:\docker\thing-planner-workos-git" `
   /MIR `
   /XD .git .venv __pycache__ `
@@ -187,30 +214,29 @@ Commit and tag:
 ```powershell
 git status
 git add .
-git commit -m "Release Thing Planner WorkOS v0.6.0"
+git commit -m "Release Thing Planner WorkOS v0.7.0"
 git push origin main
 
-git tag -f v0.6.0
-git push origin v0.6.0 --force
+git tag -f v0.7.0
+git push origin v0.7.0 --force
 ```
 
 ## Validation performed
 
 - `python3 -m py_compile backend/app/main.py`
 - `node --check assets/app.js`
-- FastAPI SQLite smoke test against health, schema, planner, plan-my-day, focus block creation, frontend JavaScript syntax, and prior API compatibility.
+- FastAPI SQLite smoke test against health, schema, state, Gantt dataset, critical path, recalculation, baseline creation, task rescheduling/cascade, and prior API compatibility.
 
 ## Next recommended build
 
-**v0.7.0 Gantt + Dependency / Critical Path Engine**
+**v0.8.0 Docs + Knowledge / Wiki Engine**
 
 Recommended scope:
 
-- normalized task dependency table
-- Gantt API endpoints
-- dependency editor
-- critical path calculation
-- baseline dates
-- AI delay propagation
-- reschedule dependent work
-- portfolio timeline rollup
+- normalized doc pages and blocks
+- linked docs/tasks/decisions
+- rich project docs UI
+- SOP/wiki mode
+- AI doc summary/action items
+- searchable knowledge hub
+- protected docs and decision log

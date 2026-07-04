@@ -20,7 +20,7 @@ services:
     container_name: thing-planner-api
     environment:
       DATABASE_URL: postgresql+psycopg2://thingplanner:thingplanner@db:5432/thingplanner
-      SECRET_KEY: thing-planner-workos-v060-local-secret
+      SECRET_KEY: thing-planner-workos-v070-local-secret
     depends_on:
       db:
         condition: service_healthy

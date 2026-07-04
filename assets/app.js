@@ -1,7 +1,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const STORAGE_KEY = 'thing-planner-workos-v060-state';
+const STORAGE_KEY = 'thing-planner-workos-v070-state';
 const API_BASE = window.THING_PLANNER_API_BASE || '/api';
 let apiOnline = false;
 let apiStatusText = 'Local demo mode';
@@ -9,11 +9,13 @@ let hasBootstrappedApi = false;
 let suppressApiSync = false;
 let syncTimer = null;
 let lastSyncAt = null;
-let authToken = localStorage.getItem('thing-planner-workos-v060-token') || null;
+let authToken = localStorage.getItem('thing-planner-workos-v070-token') || null;
 let currentUser = null;
 let authStatusText = 'Demo auth pending';
 let lastReportDataset = null;
 let reportStatusText = 'Local intake automation engine';
+let lastGanttDataset = null;
+let ganttStatusText = 'Local Gantt dependency engine';
 
 const seedState = {
   module: 'home',
@@ -21,7 +23,7 @@ const seedState = {
   selectedProject: 'p1',
   helper: true,
   aiPromo: true,
-  version: '0.6.0',
+  version: '0.7.0',
   workspace: {
     name: "Adrian Francis's Workspace",
     initials: 'A',
@@ -110,11 +112,22 @@ const seedState = {
     { id:'run-demo-1', automationId:'auto_intake_classify', trigger:'Form submitted', sourceType:'form_submission', sourceId:'sub-demo-1', status:'success', summary:'AI classified new intake and recommended owner', details:{form_id:'form1', task_id:'t1'}, createdAt:'2026-07-04T09:01:00Z' },
     { id:'run-demo-2', automationId:'auto_intake_task', trigger:'Form submitted', sourceType:'form_submission', sourceId:'sub-demo-1', status:'success', summary:'Created kickoff task from mapped form fields', details:{form_id:'form1', task_id:'t1'}, createdAt:'2026-07-04T09:02:00Z' },
   ],
+  taskDependencies: [
+    { id:'dep_t1_t4', predecessorId:'t1', successorId:'t4', type:'FS', lagDays:0, critical:false },
+    { id:'dep_t2_t5', predecessorId:'t2', successorId:'t5', type:'FS', lagDays:1, critical:true },
+    { id:'dep_t4_t5', predecessorId:'t4', successorId:'t5', type:'FS', lagDays:0, critical:true },
+    { id:'dep_t5_t3', predecessorId:'t5', successorId:'t3', type:'FS', lagDays:0, critical:true },
+    { id:'dep_t7_t8', predecessorId:'t7', successorId:'t8', type:'FS', lagDays:0, critical:false },
+  ],
+  ganttBaselines: [],
+  ganttRiskAlerts: [],
+  ganttMetrics: {},
   aiMessages: [],
 };
 
 let state = loadState();
 ensurePlannerState();
+ensureGanttState();
 let activeHomeTab = 'Primary';
 let formBuilderOpen = false;
 let selectedTaskId = null;
@@ -176,7 +189,7 @@ async function ensureDemoAuth() {
       const data = await response.json();
       authToken = data.token;
       currentUser = data.user;
-      localStorage.setItem('thing-planner-workos-v060-token', authToken);
+      localStorage.setItem('thing-planner-workos-v070-token', authToken);
       authStatusText = `Demo auth: ${currentUser.display_name || currentUser.email}`;
     }
   } catch (error) {
@@ -310,7 +323,7 @@ function renderTopbar() {
       </button>
       <button class="top-icon" onclick="setModule('planner')">▣</button>
       <button class="top-icon" onclick="toast('No workspace warnings today')">⚠</button>
-      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.6 planner/scheduling/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
+      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.7 Gantt/planner/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
     </div>
     <div class="global-search-wrap">
       <label class="global-search"><span>⌕</span><input id="globalSearch" placeholder="Search ⌘K" onkeydown="if(event.key==='Enter') globalSearch(this.value)" /></label>
@@ -662,7 +675,7 @@ function renderSpacesMain() {
 function viewTab(view, label) {
   return `<button class="tab ${state.view===view ? 'active' : ''}" onclick="setView('${view}')">${label}</button>`;
 }
-function setView(view) { state.view = view; render(); }
+function setView(view) { state.view = view; render(); if (view === 'gantt') refreshGanttFromApi(false); }
 function getProjectName(id) { return id === 'p2' ? 'Project 2' : 'Project 1'; }
 function projectTasks() { return state.tasks.filter(t => t.projectId === state.selectedProject); }
 function renderProjectView() {
@@ -734,15 +747,39 @@ function renderCalendarView() {
 }
 
 function renderGanttView() {
-  const tasks = projectTasks();
-  return `<div class="gantt-wrap">
-    <div class="gantt-row" style="background:#fafafc;font-weight:800;color:#77737f"><div class="gantt-name">Task</div><div class="gantt-lane" style="display:flex;justify-content:space-around;align-items:center;font-size:11px;background:none"><span>Jul 4</span><span>Jul 6</span><span>Jul 8</span><span>Jul 10</span><span>Jul 12</span></div><div class="gantt-risk">AI risk</div></div>
-    ${tasks.map((t,i) => {
-      const left = (i * 43 + (t.critical?36:12)) % 360;
-      const width = Math.max(70, t.duration * 48);
-      const warn = t.status === 'BLOCKED' || (t.critical && t.status !== 'DONE');
-      return `<div class="gantt-row"><div class="gantt-name" onclick="openTask('${t.id}')">${escapeHtml(t.name)}</div><div class="gantt-lane"><div class="gantt-bar ${warn ? 'warn' : ''}" style="left:${left}px;width:${width}px">${t.progress}%</div></div><div class="gantt-risk">${warn ? '<span class="badge warn">Delay risk</span>' : '<span class="badge green">On track</span>'}</div></div>`;
-    }).join('')}
+  ensureGanttState();
+  const data = (lastGanttDataset && lastGanttDataset.projectId === state.selectedProject) ? lastGanttDataset : computeLocalGanttDataset(state.selectedProject);
+  const timeline = data.timeline || { start:'2026-07-04', end:'2026-07-14', days:10 };
+  const ticks = ganttTicks(timeline.start, timeline.days);
+  const tasks = data.tasks || [];
+  const dependencies = data.dependencies || [];
+  const risks = data.risks || [];
+  const metrics = data.metrics || {};
+  const taskOptions = projectTasks().map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  return `<div class="gantt-command-center">
+    <div class="gantt-hero">
+      <div><span class="badge purple">v0.7 Critical Path</span><h2>Gantt that keeps up when plans don't</h2><p>Set dependencies, track critical path, cascade schedule changes, and let AI flag delay risks before they spread.</p></div>
+      <div class="gantt-actions"><button class="btn-primary" onclick="recalculateGantt()">✦ Recalculate critical path</button><button class="btn-secondary" onclick="createGanttBaseline()">Capture baseline</button><button class="btn-secondary" onclick="refreshGanttFromApi()">Refresh</button></div>
+    </div>
+    <div class="gantt-metrics">
+      ${ganttMetricCard('Tasks', metrics.taskCount ?? tasks.length, 'Current project scope')}
+      ${ganttMetricCard('Dependencies', metrics.dependencyCount ?? dependencies.length, 'Finish-to-start links')}
+      ${ganttMetricCard('Critical path', metrics.criticalTasks ?? tasks.filter(t=>t.criticalPath).length, 'Tasks driving finish date')}
+      ${ganttMetricCard('Risks', metrics.riskCount ?? risks.length, `${metrics.conflictCount || 0} conflicts • Finish ${metrics.endDate || timeline.end}`)}
+    </div>
+    <div class="gantt-grid-card">
+      <div class="gantt-table-head"><div>Task / owner</div><div class="gantt-timescale">${ticks.map(x=>`<span>${x}</span>`).join('')}</div><div>Schedule controls</div></div>
+      ${tasks.map(t => renderGanttTaskRow(t, timeline)).join('')}
+    </div>
+    <div class="gantt-lower-grid">
+      <div class="gantt-panel"><div class="section-title"><h3>Dependency editor</h3><button class="btn-secondary btn-small" onclick="addGanttDependencyFromControls()">＋ Link</button></div>
+        <div class="dependency-controls"><select id="ganttPred">${taskOptions}</select><span>→</span><select id="ganttSucc">${taskOptions}</select><select id="ganttLag"><option value="0">0 day lag</option><option value="1">1 day lag</option><option value="2">2 day lag</option></select></div>
+        ${dependencies.length ? dependencies.map(renderDependencyRow).join('') : '<p class="muted">No dependencies yet. Link two tasks to drive the critical path.</p>'}
+      </div>
+      <div class="gantt-panel"><div class="section-title"><h3>AI delay watch</h3><button class="btn-secondary btn-small" onclick="setModule('planner')">Plan recovery</button></div>
+        ${risks.length ? risks.map(r => `<div class="risk-row ${r.level || 'medium'}"><b>${escapeHtml(r.title)}</b><p>${escapeHtml(r.recommendation || 'Review schedule and owner capacity.')}</p>${r.taskId ? `<button class="btn-secondary btn-small" onclick="openTask('${r.taskId}')">Open task</button>` : ''}</div>`).join('') : '<div class="risk-row low"><b>No critical schedule risks found</b><p>Dependencies and critical path are currently aligned.</p></div>'}
+      </div>
+    </div>
   </div>`;
 }
 
@@ -1407,7 +1444,7 @@ function renderDataLayerCards() {
   const submissions = (state.formSubmissions || []).length;
   const runs = (state.automationRuns || []).length;
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.6 Planner + Automation</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.7 Gantt + Planner</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • intake actions enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Forms</span><h3>Submissions</h3><div class="value">${submissions}</div><div class="trend">AI analysis and task routing available</div><button class="btn-secondary" onclick="setModule('forms')">Open forms</button></div>
     <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">/api/automations and /api/automations/run</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
@@ -1538,10 +1575,10 @@ function renderDataLayerCards() {
   const blocks = (state.plannerBlocks || []).length;
   const events = (state.calendarEvents || []).length;
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.6 Planner + Automation</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.7 Gantt + Planner</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • scheduling enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Planner</span><h3>Schedule objects</h3><div class="value">${blocks + events}</div><div class="trend">${blocks} planner blocks • ${events} calendar events</div><button class="btn-secondary" onclick="setModule('planner')">Open planner</button></div>
-    <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/planner and /api/automations</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
+    <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/gantt, /api/planner and /api/automations</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
   </div>`;
 }
 
@@ -1576,6 +1613,48 @@ window.dashboardAction = dashboardAction;
 window.drilldownReport = drilldownReport;
 window.toggleAutomation = toggleAutomation;
 window.planMyDay = planMyDay;
+
+function ensureGanttState(){
+  state.taskDependencies = state.taskDependencies || [];
+  state.ganttRiskAlerts = state.ganttRiskAlerts || [];
+  state.ganttBaselines = state.ganttBaselines || [];
+  state.ganttMetrics = state.ganttMetrics || {};
+}
+function ganttDate(value){ const d = value ? new Date(String(value).slice(0,10)+'T00:00:00') : new Date(); return Number.isNaN(d.getTime()) ? new Date() : d; }
+function ganttIso(d){ return d.toISOString().slice(0,10); }
+function ganttAddDays(value, days){ const d=ganttDate(value); d.setDate(d.getDate()+Number(days||0)); return ganttIso(d); }
+function ganttDayDiff(a,b){ return Math.round((ganttDate(b)-ganttDate(a))/(1000*60*60*24)); }
+function taskEndDate(t){ return ganttAddDays(t.start || t.due, Math.max(1, Number(t.duration||1))); }
+function taskById(id){ return state.tasks.find(t=>t.id===id); }
+function ganttTicks(start, days){ const total=Math.max(4, Number(days||10)); const step=Math.max(1, Math.ceil(total/5)); const out=[]; for(let i=0;i<=total;i+=step){ const d=ganttDate(start); d.setDate(d.getDate()+i); out.push(d.toLocaleDateString(undefined,{month:'short',day:'numeric'})); } return out.slice(0,6); }
+function computeLocalCriticalPath(tasks, deps){
+  const byId=Object.fromEntries(tasks.map(t=>[t.id,t])); const succ={}; tasks.forEach(t=>succ[t.id]=[]); deps.forEach(d=>{ if(byId[d.predecessorId]&&byId[d.successorId]) (succ[d.predecessorId] ||= []).push(d.successorId); });
+  const memo={}; const visiting=new Set();
+  function best(id){ if(memo[id]) return memo[id]; if(visiting.has(id)) return {score:0,path:[id]}; visiting.add(id); const dur=Math.max(1,Number(byId[id]?.duration||1)); let bestScore=dur, bestPath=[id]; (succ[id]||[]).forEach(s=>{ const r=best(s); if(dur+r.score>bestScore){ bestScore=dur+r.score; bestPath=[id,...r.path]; }}); visiting.delete(id); memo[id]={score:bestScore,path:bestPath}; return memo[id]; }
+  let top={score:0,path:[]}; tasks.forEach(t=>{ const r=best(t.id); if(r.score>top.score) top=r; });
+  return [...new Set([...top.path, ...tasks.filter(t=>t.critical).map(t=>t.id)])];
+}
+function computeLocalGanttDataset(projectId){
+  ensureGanttState(); const tasks=state.tasks.filter(t=>t.projectId===projectId); const ids=new Set(tasks.map(t=>t.id)); const deps=(state.taskDependencies||[]).filter(d=>ids.has(d.predecessorId)&&ids.has(d.successorId));
+  const criticalPath=computeLocalCriticalPath(tasks,deps); const starts=tasks.map(t=>ganttDate(t.start||t.due)); const ends=tasks.map(t=>ganttDate(taskEndDate(t))); const min=new Date(Math.min(...starts.map(d=>d.getTime()), Date.now())); const max=new Date(Math.max(...ends.map(d=>d.getTime()), Date.now()+7*86400000)); const timeline={start:ganttIso(min), end:ganttIso(max), days:Math.max(1,ganttDayDiff(ganttIso(min),ganttIso(max))+1)};
+  let conflictCount=0; const risks=[]; deps.forEach(d=>{ const pred=taskById(d.predecessorId), succ=taskById(d.successorId); if(!pred||!succ) return; const req=ganttAddDays(taskEndDate(pred), Number(d.lagDays||0)); const actual=succ.start||succ.due; if(ganttDate(actual)<ganttDate(req)&&succ.status!=='DONE'){ conflictCount++; risks.push({level:d.critical?'high':'medium', taskId:succ.id, title:`Dependency conflict: ${succ.name} starts before ${pred.name} finishes`, recommendation:`Move ${succ.name} to ${req} or reduce predecessor duration.`}); }});
+  tasks.forEach(t=>{ if(t.status==='BLOCKED' && criticalPath.includes(t.id)) risks.push({level:'high', taskId:t.id, title:`Critical path task is blocked: ${t.name}`, recommendation:'Escalate blocker and run schedule cascade.'}); if(t.status!=='DONE' && t.due && ganttDate(t.due)<ganttDate(new Date())) risks.push({level:'high', taskId:t.id, title:`Overdue task threatens schedule: ${t.name}`, recommendation:'Reschedule or assign recovery work.'}); });
+  const viewTasks=tasks.map(t=>{ const start=t.start||t.due; const end=taskEndDate(t); return {...t, start, end, criticalPath:criticalPath.includes(t.id), critical:t.critical || criticalPath.includes(t.id), predecessors:deps.filter(d=>d.successorId===t.id).map(d=>d.predecessorId), successors:deps.filter(d=>d.predecessorId===t.id).map(d=>d.successorId), offsetDays:Math.max(0,ganttDayDiff(timeline.start,start)), widthDays:Math.max(1,ganttDayDiff(start,end)), timelineDays:timeline.days}; });
+  return {ok:true, projectId, timeline, tasks:viewTasks, dependencies:deps, criticalPath, risks, metrics:{taskCount:tasks.length, dependencyCount:deps.length, criticalTasks:criticalPath.length, riskCount:risks.length, conflictCount, endDate:timeline.end, blockedCritical:tasks.filter(t=>t.status==='BLOCKED'&&criticalPath.includes(t.id)).length}};
+}
+function ganttMetricCard(label,value,trend){ return `<div class="gantt-metric"><span>${escapeHtml(label)}</span><b>${value}</b><em>${escapeHtml(trend)}</em></div>`; }
+function renderGanttTaskRow(t,timeline){ const left=(t.offsetDays/Math.max(1,timeline.days))*100; const width=Math.max(5,(t.widthDays/Math.max(1,timeline.days))*100); const member=memberById(t.assignee||'adrian'); const cls=t.criticalPath?'critical':(t.blocked?'blocked':''); return `<div class="gantt-task-row ${cls}"><div class="gantt-task-name" onclick="openTask('${t.id}')"><b>${escapeHtml(t.name)}</b><span><span class="avatar tiny ${member.avatar}">${member.initials}</span> ${escapeHtml(member.name)} • ${t.status}</span></div><div class="gantt-track"><div class="gantt-dep-line">${(t.predecessors||[]).length?'↤ '+t.predecessors.length+' pred':''}</div><div class="gantt-bar-v7 ${cls}" style="left:${left}%;width:${width}%"><span>${t.progress||0}%</span></div></div><div class="gantt-row-actions"><input type="date" value="${t.start||''}" onchange="rescheduleGanttTask('${t.id}', this.value, null, true)"/><input type="number" min="1" value="${t.duration||1}" onchange="rescheduleGanttTask('${t.id}', null, Number(this.value), true)"/><button class="btn-secondary btn-small" onclick="shiftGanttTask('${t.id}',1)">＋1d</button></div></div>`; }
+function renderDependencyRow(d){ const pred=taskById(d.predecessorId), succ=taskById(d.successorId); return `<div class="dependency-row"><div><b>${escapeHtml(pred?.name||d.predecessorId)}</b><span>→ ${escapeHtml(succ?.name||d.successorId)} • ${d.type||'FS'} +${d.lagDays||0}d ${d.critical?'• critical':''}</span></div><button class="btn-secondary btn-small" onclick="removeGanttDependency('${d.id}')">Remove</button></div>`; }
+function applyGanttPayload(data){ if(!data) return; if(data.state){ state={...state,...data.state}; ensureGanttState(); } if(data.dependencies) state.taskDependencies=data.dependencies; if(data.baselines) state.ganttBaselines=data.baselines; if(data.risks) state.ganttRiskAlerts=data.risks; if(data.metrics) state.ganttMetrics=data.metrics; lastGanttDataset=data; ganttStatusText=apiOnline?'API Gantt synced':'Local Gantt'; }
+async function refreshGanttFromApi(showToast=true){ ensureGanttState(); if(!apiOnline){ lastGanttDataset=computeLocalGanttDataset(state.selectedProject); if(showToast) toast('Gantt running locally'); render(); return; } try{ const res=await fetch(`${API_BASE}/gantt?project_id=${state.selectedProject}`, {headers:authHeaders(), cache:'no-store'}); if(!res.ok) throw new Error('Gantt API failed'); const data=await res.json(); applyGanttPayload(data); saveState(); if(showToast) toast('Gantt refreshed from API'); render(); }catch(err){ console.warn(err); apiOnline=false; lastGanttDataset=computeLocalGanttDataset(state.selectedProject); if(showToast) toast('Gantt API unavailable; using local engine'); render(); }}
+async function recalculateGantt(){ if(apiOnline){ try{ const res=await fetch(`${API_BASE}/gantt/recalculate?project_id=${state.selectedProject}`, {method:'POST', headers:authHeaders()}); if(res.ok){ const data=await res.json(); applyGanttPayload(data); toast(`Critical path: ${data.metrics?.criticalTasks||0} tasks • ${data.metrics?.riskCount||0} risks`); saveState(); render(); return; }}catch(err){ console.warn(err); }} lastGanttDataset=computeLocalGanttDataset(state.selectedProject); toast(`Local critical path: ${lastGanttDataset.metrics.criticalTasks} tasks • ${lastGanttDataset.metrics.riskCount} risks`); saveState(); render(); }
+async function addGanttDependencyFromControls(){ const pred=$('#ganttPred')?.value; const succ=$('#ganttSucc')?.value; const lag=Number($('#ganttLag')?.value||0); if(!pred||!succ||pred===succ){ toast('Choose two different tasks'); return; } if(apiOnline){ try{ const res=await fetch(`${API_BASE}/gantt/dependencies`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify({predecessor_task_id:pred, successor_task_id:succ, dependency_type:'FS', lag_days:lag, critical:false})}); if(res.ok){ const data=await res.json(); applyGanttPayload(data); toast('Dependency linked'); saveState(); render(); return; } const err=await res.json().catch(()=>({detail:'Could not link'})); toast(err.detail||'Dependency not linked'); return; }catch(e){ console.warn(e); }} state.taskDependencies.push({id:uid(), predecessorId:pred, successorId:succ, type:'FS', lagDays:lag, critical:false}); lastGanttDataset=computeLocalGanttDataset(state.selectedProject); toast('Dependency linked locally'); saveState(); render(); }
+async function removeGanttDependency(id){ if(apiOnline){ try{ const res=await fetch(`${API_BASE}/gantt/dependencies/${id}`, {method:'DELETE', headers:authHeaders()}); if(res.ok){ const data=await res.json(); applyGanttPayload(data); toast('Dependency removed'); saveState(); render(); return; }}catch(e){ console.warn(e); }} state.taskDependencies=(state.taskDependencies||[]).filter(d=>d.id!==id); lastGanttDataset=computeLocalGanttDataset(state.selectedProject); toast('Dependency removed locally'); saveState(); render(); }
+async function rescheduleGanttTask(taskId, start, duration, cascade=true){ const t=taskById(taskId); if(!t) return; const newStart=start || t.start || t.due; const newDuration=duration || Number(t.duration||1); if(apiOnline){ try{ const res=await fetch(`${API_BASE}/gantt/tasks/${taskId}/schedule`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify({start:newStart, duration:newDuration, cascade, reason:'Updated from Gantt row controls'})}); if(res.ok){ const data=await res.json(); applyGanttPayload(data); toast(`Task rescheduled${cascade?' and dependents checked':''}`); saveState(); render(); return; }}catch(e){ console.warn(e); }} t.start=newStart; t.duration=newDuration; t.due=ganttAddDays(newStart,newDuration); if(cascade) cascadeLocalFrom(taskId); lastGanttDataset=computeLocalGanttDataset(state.selectedProject); toast('Task rescheduled locally'); saveState(); render(); }
+function shiftGanttTask(taskId, days){ const t=taskById(taskId); if(!t) return; rescheduleGanttTask(taskId, ganttAddDays(t.start||t.due, days), null, true); }
+function cascadeLocalFrom(taskId, seen=new Set()){ if(seen.has(taskId)) return; seen.add(taskId); const pred=taskById(taskId); if(!pred) return; (state.taskDependencies||[]).filter(d=>d.predecessorId===taskId).forEach(d=>{ const succ=taskById(d.successorId); if(!succ) return; const required=ganttAddDays(taskEndDate(pred), Number(d.lagDays||0)); if(ganttDate(succ.start||succ.due)<ganttDate(required)){ succ.start=required; succ.due=ganttAddDays(required, Math.max(1,Number(succ.duration||1))); cascadeLocalFrom(succ.id, seen); }}); }
+async function createGanttBaseline(){ const name=prompt('Baseline name', `Baseline ${new Date().toLocaleDateString()}`); if(!name) return; if(apiOnline){ try{ const res=await fetch(`${API_BASE}/gantt/baselines`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify({project_id:state.selectedProject, name})}); if(res.ok){ const data=await res.json(); applyGanttPayload(data); toast('Baseline captured'); saveState(); render(); return; }}catch(e){ console.warn(e); }} const snapshots=projectTasks().map(t=>({taskId:t.id,name:t.name,start:t.start,due:t.due,duration:t.duration,status:t.status,progress:t.progress})); state.ganttBaselines.push({id:uid(), projectId:state.selectedProject, name, taskSnapshots:snapshots, createdAt:new Date().toISOString()}); toast('Baseline captured locally'); saveState(); render(); }
+
 window.refreshPlannerFromApi = refreshPlannerFromApi;
 window.setPlannerDate = setPlannerDate;
 window.shiftPlannerDate = shiftPlannerDate;
@@ -1595,3 +1674,11 @@ window.dismissBanner = dismissBanner;
 
 render();
 hydrateFromApi();
+
+window.refreshGanttFromApi = refreshGanttFromApi;
+window.recalculateGantt = recalculateGantt;
+window.addGanttDependencyFromControls = addGanttDependencyFromControls;
+window.removeGanttDependency = removeGanttDependency;
+window.rescheduleGanttTask = rescheduleGanttTask;
+window.shiftGanttTask = shiftGanttTask;
+window.createGanttBaseline = createGanttBaseline;

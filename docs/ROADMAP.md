@@ -1,4 +1,6 @@
 # Thing Planner WorkOS Roadmap
+> v0.3.0 update: the backend now uses normalized relational tables with demo authentication and /api/state compatibility serialization. See `DATABASE_SCHEMA_v0.3.0.md` and `AUTH_v0.3.0.md`.
+
 
 ## v0.1 — Workspace Shell and Interactive Prototype
 
@@ -21,7 +23,7 @@ Status: Built in this package.
 - LocalStorage persistence
 - Docker packaging
 
-## v0.2 — Production Data Layer
+## v0.3 — Production Data Layer
 
 - FastAPI or NestJS backend
 - PostgreSQL database

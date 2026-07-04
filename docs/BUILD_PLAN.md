@@ -1,4 +1,6 @@
 # Build Plan
+> v0.3.0 update: the backend now uses normalized relational tables with demo authentication and /api/state compatibility serialization. See `DATABASE_SCHEMA_v0.3.0.md` and `AUTH_v0.3.0.md`.
+
 
 ## Product goal
 

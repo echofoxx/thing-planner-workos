@@ -1,8 +1,10 @@
-# v0.2.0 Data Layer Design
+# v0.3.0 Data Layer Design
+> v0.3.0 update: the backend now uses normalized relational tables with demo authentication and /api/state compatibility serialization. See `DATABASE_SCHEMA_v0.3.0.md` and `AUTH_v0.3.0.md`.
+
 
 ## Purpose
 
-v0.2.0 adds the first backend service for Thing Planner WorkOS. The intent is to move from a static LocalStorage prototype to a full-stack application while avoiding a heavy data migration too early.
+v0.3.0 adds the first backend service for Thing Planner WorkOS. The intent is to move from a static LocalStorage prototype to a full-stack application while avoiding a heavy data migration too early.
 
 ## Current approach
 

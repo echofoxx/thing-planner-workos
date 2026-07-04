@@ -482,7 +482,7 @@ button { cursor: pointer; }
   .rail { position: sticky; top: 0; height: 100vh; }
 }
 
-/* v0.2.0 data layer status */
+/* v0.3.0 normalized data/auth status */
 .api-status-badge{
   display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;border:1px solid var(--border);font-size:11px;font-weight:700;white-space:nowrap;background:#fff;color:var(--muted);
 }

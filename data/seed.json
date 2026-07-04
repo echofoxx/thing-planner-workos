@@ -1,7 +1,26 @@
 {
   "workspace": "Adrian Francis's Workspace",
-  "spaces": ["Team Space"],
-  "projects": ["Project 1", "Project 2"],
-  "modules": ["Home", "Spaces", "Planner", "AI", "Teams", "Docs", "Dashboards", "Whiteboards", "Forms", "Clips", "Goals", "More"],
-  "release": "v0.1.0"
+  "spaces": [
+    "Team Space"
+  ],
+  "projects": [
+    "Project 1",
+    "Project 2"
+  ],
+  "modules": [
+    "Home",
+    "Spaces",
+    "Planner",
+    "AI",
+    "Teams",
+    "Docs",
+    "Dashboards",
+    "Whiteboards",
+    "Forms",
+    "Clips",
+    "Goals",
+    "More"
+  ],
+  "release": "v0.3.0",
+  "backend": "FastAPI + PostgreSQL persistence"
 }

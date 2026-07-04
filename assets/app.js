@@ -1,7 +1,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const STORAGE_KEY = 'thing-planner-workos-v020-state';
+const STORAGE_KEY = 'thing-planner-workos-v030-state';
 const API_BASE = window.THING_PLANNER_API_BASE || '/api';
 let apiOnline = false;
 let apiStatusText = 'Local demo mode';
@@ -9,6 +9,9 @@ let hasBootstrappedApi = false;
 let suppressApiSync = false;
 let syncTimer = null;
 let lastSyncAt = null;
+let authToken = localStorage.getItem('thing-planner-workos-v030-token') || null;
+let currentUser = null;
+let authStatusText = 'Demo auth pending';
 
 const seedState = {
   module: 'home',
@@ -16,7 +19,7 @@ const seedState = {
   selectedProject: 'p1',
   helper: true,
   aiPromo: true,
-  version: '0.2.0',
+  version: '0.3.0',
   workspace: {
     name: "Adrian Francis's Workspace",
     initials: 'A',
@@ -115,7 +118,7 @@ async function syncStateToApi() {
   try {
     await fetch(`${API_BASE}/state`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ state })
     });
     lastSyncAt = new Date();
@@ -124,6 +127,37 @@ async function syncStateToApi() {
     apiOnline = false;
     apiStatusText = 'API offline - local mode';
     console.warn('API sync failed', error);
+  }
+}
+
+function authHeaders() {
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {};
+}
+
+async function ensureDemoAuth() {
+  if (!apiOnline) return;
+  try {
+    let response;
+    if (authToken) {
+      response = await fetch(`${API_BASE}/auth/me`, { headers: authHeaders(), cache: 'no-store' });
+      if (response.ok) {
+        const me = await response.json();
+        currentUser = me.user;
+        authStatusText = `Signed in: ${currentUser.display_name || currentUser.email}`;
+        return;
+      }
+    }
+    response = await fetch(`${API_BASE}/auth/demo-login`, { method: 'POST' });
+    if (response.ok) {
+      const data = await response.json();
+      authToken = data.token;
+      currentUser = data.user;
+      localStorage.setItem('thing-planner-workos-v030-token', authToken);
+      authStatusText = `Demo auth: ${currentUser.display_name || currentUser.email}`;
+    }
+  } catch (error) {
+    authStatusText = 'Auth offline';
+    console.warn('Demo auth failed', error);
   }
 }
 
@@ -136,7 +170,8 @@ async function hydrateFromApi() {
     if (!response.ok) throw new Error('State fetch failed');
     const data = await response.json();
     apiOnline = true;
-    apiStatusText = `${healthJson.version || 'v0.2.0'} API connected`;
+    apiStatusText = `${healthJson.version || 'v0.3.0'} ${healthJson.schema || 'API'} connected`;
+    await ensureDemoAuth();
     hasBootstrappedApi = true;
     if (data && data.state) {
       suppressApiSync = true;
@@ -228,7 +263,7 @@ function renderTopbar() {
       </button>
       <button class="top-icon" onclick="setModule('planner')">▣</button>
       <button class="top-icon" onclick="toast('No workspace warnings today')">⚠</button>
-      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.2 data layer status">${apiStatusText}</span>
+      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.3 normalized data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
     </div>
     <div class="global-search-wrap">
       <label class="global-search"><span>⌕</span><input id="globalSearch" placeholder="Search ⌘K" onkeydown="if(event.key==='Enter') globalSearch(this.value)" /></label>
@@ -455,7 +490,7 @@ function renderMoreSidebar() {
       <div class="side-item" onclick="setModule('automations')"><span>⚡</span><span>Automations</span></div>
       <div class="side-item"><span>🔌</span><span>Integrations</span></div>
       <div class="side-item"><span>🔐</span><span>Admin & Security</span></div>
-      <div class="side-item" onclick="showDataLayerStatus()"><span>◉</span><span>Data Layer Status</span></div>
+      <div class="side-item" onclick="showDataLayerStatus()"><span>◉</span><span>Data/Auth Status</span></div>
       <div class="side-item" onclick="resetDemoData()"><span>↺</span><span>Reset demo data</span></div>
     </div>
   `);
@@ -967,7 +1002,7 @@ function renderClipsMain() {
 
 function showDataLayerStatus() {
   const message = apiOnline
-    ? `Connected to the v0.2 API. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
+    ? `Connected to the v0.3 normalized API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
     : 'Running in local fallback mode. Start Docker Compose to enable FastAPI persistence.';
   toast(message);
 }
@@ -977,9 +1012,10 @@ function renderDataLayerCards() {
   const projects = state.spaces.flatMap(s => s.folders || []).flatMap(f => f.lists || []).filter(l => l.kind === 'project').length;
   const comments = state.tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0);
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.2 Data Layer</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.3 Normalized Data</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
-    <div class="kpi-card"><span class="badge green">New</span><h3>API endpoints</h3><p class="trend">/api/state, /api/tasks, /api/reports/summary, /api/ai/project-summary, /api/reset</p><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
+    <div class="kpi-card"><span class="badge green">Auth</span><h3>Demo sign-in</h3><div class="value">${currentUser ? 'Active' : 'Local'}</div><div class="trend">${authStatusText}<br/>Demo email: echofoxx@gmail.com</div><button class="btn-secondary" onclick="ensureDemoAuth(); toast('Demo authentication requested')">Sign in</button></div>
+    <div class="kpi-card"><span class="badge green">New</span><h3>API endpoints</h3><p class="trend">/api/auth/login, /api/schema, /api/activity, /api/state, /api/tasks, /api/reports/summary</p><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
   </div>`;
 }
 
@@ -1053,6 +1089,7 @@ window.globalSearch = globalSearch;
 window.resetDemoData = resetDemoData;
 window.showDataLayerStatus = showDataLayerStatus;
 window.syncStateToApi = syncStateToApi;
+window.ensureDemoAuth = ensureDemoAuth;
 window.dismissBanner = dismissBanner;
 
 render();

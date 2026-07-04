@@ -1,26 +1,25 @@
-# Thing Planner WorkOS v0.2.0
+# Thing Planner WorkOS v0.3.0
 
-Thing Planner WorkOS is an independently branded, ClickUp-style project/work management platform prototype. v0.2.0 moves the v0.1 workspace shell into a real full-stack foundation with a FastAPI backend, PostgreSQL-backed persistence, API documentation, and frontend API sync while preserving the polished WorkOS UI.
+Thing Planner WorkOS is an independently branded, ClickUp-style project/work management platform prototype. v0.3.0 upgrades the full-stack foundation from a single JSON state snapshot into a normalized database model with demo authentication, workspace membership, custom fields, activity logs, and a compatibility API that keeps the current UI working.
 
-## What is new in v0.2.0
+## What is new in v0.3.0
 
-- FastAPI backend under `/backend`.
-- PostgreSQL service in `docker-compose.yml`.
-- SQLite fallback compose file for lightweight local testing.
-- Persistent workspace state through `/api/state`.
-- Task CRUD endpoints under `/api/tasks`.
-- Comment endpoint under `/api/tasks/{task_id}/comments`.
-- Project intake endpoint under `/api/forms/project-intake`.
-- Report endpoint under `/api/reports/summary`.
-- AI summary stub endpoint under `/api/ai/project-summary`.
-- API health/status endpoint under `/api/health`.
-- OpenAPI docs proxied at `/api/docs`.
-- Frontend API status pill showing connected/offline mode.
-- Frontend syncs workspace changes to the backend when Docker Compose is running.
-- LocalStorage fallback still works when the API is offline.
-- Data Layer Status cards under **More**.
+- Normalized FastAPI + SQLAlchemy backend schema.
+- PostgreSQL-backed relational tables for users, workspaces, members, hierarchy, tasks, comments, dashboards, forms, docs, goals, automations, custom fields, notifications, activity logs, and sessions.
+- Demo authentication flow.
+- Demo account: `echofoxx@gmail.com` / `thingplanner`.
+- Lightweight bearer token support for local prototype use.
+- `/api/state` compatibility endpoint now serializes/deserializes normalized tables.
+- `/api/schema` endpoint documents the normalized model.
+- `/api/activity` endpoint exposes audit/activity events.
+- `/api/permissions` endpoint exposes workspace role/permission seed data.
+- `/api/custom-fields` endpoint exposes custom field definitions.
+- Health endpoint now reports schema, auth status, and table counts.
+- Frontend now shows v0.3 Data/Auth status badges.
+- More module now includes normalized data and demo auth cards.
+- Release docs for auth and database schema.
 
-## What is preserved from v0.1.0
+## What is preserved from v0.2.0
 
 - Purple global app rail.
 - Context sidebars.
@@ -32,6 +31,9 @@ Thing Planner WorkOS is an independently branded, ClickUp-style project/work man
 - Forms template page and project intake builder.
 - AI assistant page.
 - Planner, automations, docs, goals, teams, clips, and whiteboard starter modules.
+- PostgreSQL Docker Compose mode.
+- SQLite fallback compose mode.
+- LocalStorage fallback if the API is offline.
 
 ## Run with Docker Compose, PostgreSQL mode
 
@@ -39,8 +41,8 @@ From PowerShell:
 
 ```powershell
 cd C:\docker
-Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.2.0.zip" "C:\docker\thing-planner-workos-v0.2.0"
-cd C:\docker\thing-planner-workos-v0.2.0\thing-planner-workos-v0.2.0
+Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.3.0.zip" "C:\docker\thing-planner-workos-v0.3.0"
+cd C:\docker\thing-planner-workos-v0.3.0\thing-planner-workos-v0.3.0
 docker compose up --build -d
 ```
 
@@ -80,15 +82,41 @@ python3 -m http.server 8098
 
 The app will run in local fallback mode and will show `API offline - local mode` in the top bar.
 
+## Demo authentication
+
+The frontend automatically requests demo auth when the API is online. You can also test directly:
+
+```powershell
+Invoke-RestMethod -Method POST http://localhost:8099/api/auth/demo-login
+```
+
+Manual login payload:
+
+```json
+{
+  "email": "echofoxx@gmail.com",
+  "password": "thingplanner"
+}
+```
+
 ## API endpoints
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/api/health` | Backend/database status |
-| GET | `/api/state` | Load complete workspace state |
-| PUT | `/api/state` | Save complete workspace state |
-| POST | `/api/reset` | Reset backend seed data |
-| GET | `/api/tasks` | List tasks |
+| GET | `/api/health` | Backend/database/auth/schema status |
+| POST | `/api/auth/login` | Demo login with email/password |
+| POST | `/api/auth/demo-login` | One-click demo auth |
+| GET | `/api/auth/me` | Current bearer-token user |
+| GET | `/api/schema` | Normalized schema description |
+| GET | `/api/workspaces/current` | Workspace, members, hierarchy, custom fields |
+| GET | `/api/members` | Workspace member list |
+| GET | `/api/permissions` | Role and permission seed data |
+| GET | `/api/activity` | Activity/audit feed |
+| GET | `/api/custom-fields` | Custom field definitions |
+| GET | `/api/state` | Load complete UI-compatible workspace state from normalized tables |
+| PUT | `/api/state` | Sync UI state back into normalized tables |
+| POST | `/api/reset` | Reset database and reseed normalized tables |
+| GET | `/api/tasks` | List tasks, optionally filtered by project/status/assignee |
 | POST | `/api/tasks` | Create task |
 | PATCH | `/api/tasks/{task_id}` | Update task fields |
 | DELETE | `/api/tasks/{task_id}` | Delete task |
@@ -99,22 +127,41 @@ The app will run in local fallback mode and will show `API offline - local mode`
 
 ## Data model status
 
-v0.2.0 uses a durable `state_snapshots` table to persist the full workspace JSON state. This is intentionally simple so the prototype can evolve quickly. The API already exposes task-level endpoints so the next release can progressively normalize the data model into dedicated tables for users, workspaces, spaces, folders, lists, tasks, comments, dashboards, forms, automations, docs, and AI agents.
+v0.3.0 introduces normalized database tables while maintaining compatibility with the existing SPA. The next releases can progressively move each UI module away from full-state sync and onto dedicated backend endpoints.
 
-## Recommended next release: v0.3.0
+Key normalized entities:
 
-v0.3.0 should normalize the database and add real authentication:
+```text
+users, workspaces, workspace_members, spaces, folders, lists, task_statuses,
+tasks, task_comments, custom_fields, custom_field_values, notifications,
+dashboards, forms, docs, goals, automations, activity_logs, sessions
+```
 
-- Workspace/user/member tables.
-- Task/comment/custom field tables.
-- JWT/session authentication.
-- User invite flow.
-- Role-based permissions.
-- API-backed forms and dashboards.
-- Migration scripts.
-- Better API error handling.
-- Seed data loader.
-- GitHub repo release workflow.
+## GitHub update commands
+
+From inside this release folder:
+
+```powershell
+git status
+git add .
+git commit -m "Release Thing Planner WorkOS v0.3.0"
+git push origin main
+git tag -f v0.3.0
+git push origin v0.3.0 --force
+```
+
+## Recommended next release: v0.4.0
+
+v0.4.0 should focus on the dashboard/reporting engine:
+
+- Normalized dashboard cards.
+- Saved report filters.
+- Server-side report endpoints.
+- Drill-down records.
+- Editable dashboard actions.
+- Dashboard card layout persistence.
+- AI report summary cards.
+- Export-ready executive dashboard views.
 
 ## Important product note
 

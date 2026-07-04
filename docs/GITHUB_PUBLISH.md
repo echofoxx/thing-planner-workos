@@ -1,38 +1,41 @@
-# Publish v0.4.0 to GitHub
+# Publish v0.5.0 to GitHub
 
-Recommended repository:
-
-```text
-https://github.com/echofoxx/thing-planner-workos
-```
-
-## New repository
+Use the clean GitHub working folder you created earlier:
 
 ```powershell
-cd C:\docker\thing-planner-workos-v0.4.0\thing-planner-workos-v0.4.0
-
-git init
-git branch -M main
-git add .
-git commit -m "Release Thing Planner WorkOS v0.4.0"
-
-gh repo create echofoxx/thing-planner-workos --public --source . --remote origin --push
-
-git tag v0.4.0
-git push origin v0.4.0
+cd C:\docker\thing-planner-workos-git
 ```
 
-## Existing repository
+Copy the new release into the repo:
 
 ```powershell
-cd C:\docker\thing-planner-workos
-# replace the files with this release content, then:
+robocopy `
+  "C:\docker\thing-planner-workos-v0.5.0\thing-planner-workos-v0.5.0" `
+  "C:\docker\thing-planner-workos-git" `
+  /MIR `
+  /XD .git .venv __pycache__ `
+  /XF *.pyc
+```
 
+Commit and push:
+
+```powershell
 git status
 git add .
-git commit -m "Release v0.4.0 normalized data and auth foundation"
+git commit -m "Release Thing Planner WorkOS v0.5.0"
 git push origin main
+```
 
-git tag v0.4.0
-git push origin v0.4.0
+Create/update release tag:
+
+```powershell
+git tag -f v0.5.0
+git push origin v0.5.0 --force
+```
+
+Verify:
+
+```powershell
+git status
+git log --oneline --max-count=5
 ```

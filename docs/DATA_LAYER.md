@@ -1,3 +1,4 @@
+> v0.5.0 update: forms now include connected intake submission, AI analysis, task creation, automation chains, and run history. See `FORMS_INTAKE_AUTOMATION_v0.5.0.md`.
 > v0.4.0 update: dashboards now use a reporting engine with server-side datasets, report cards, drill-down records, and report actions. See `REPORTING_ENGINE_v0.4.0.md`.
 
 # v0.3.0 Data Layer Design

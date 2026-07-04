@@ -1,7 +1,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const STORAGE_KEY = 'thing-planner-workos-v040-state';
+const STORAGE_KEY = 'thing-planner-workos-v050-state';
 const API_BASE = window.THING_PLANNER_API_BASE || '/api';
 let apiOnline = false;
 let apiStatusText = 'Local demo mode';
@@ -9,11 +9,11 @@ let hasBootstrappedApi = false;
 let suppressApiSync = false;
 let syncTimer = null;
 let lastSyncAt = null;
-let authToken = localStorage.getItem('thing-planner-workos-v040-token') || null;
+let authToken = localStorage.getItem('thing-planner-workos-v050-token') || null;
 let currentUser = null;
 let authStatusText = 'Demo auth pending';
 let lastReportDataset = null;
-let reportStatusText = 'Local report engine';
+let reportStatusText = 'Local intake automation engine';
 
 const seedState = {
   module: 'home',
@@ -21,7 +21,7 @@ const seedState = {
   selectedProject: 'p1',
   helper: true,
   aiPromo: true,
-  version: '0.4.0',
+  version: '0.5.0',
   workspace: {
     name: "Adrian Francis's Workspace",
     initials: 'A',
@@ -80,8 +80,12 @@ const seedState = {
   ],
   reportFilter: 'all',
   forms: [
-    { id: 'form1', name: 'Project Intake', description: 'Streamline new project requests', submissions: 3, favorite: false },
-    { id: 'form2', name: 'IT Requests', description: 'Triage and prioritize service requests', submissions: 7, favorite: true },
+    { id: 'form1', name: 'Project Intake', description: 'Streamline new project requests', submissions: 3, favorite: false, schema: { mode:'task_intake', target_project_id:'p1', ai_analysis:true } },
+    { id: 'form2', name: 'IT Requests', description: 'Triage and prioritize service requests', submissions: 7, favorite: true, schema: { mode:'service_request', target_project_id:'p2', ai_analysis:true } },
+  ],
+  formSubmissions: [
+    { id:'sub-demo-1', formId:'form1', requester:'Adrian Francis', department:'Product', priority:'High', payload:{project_name:'Customer launch dashboard'}, aiAnalysis:{classification:'Project Intake', risk:'medium', recommended_owner:'mira', duplicate_risk:'medium'}, createdTaskId:'t1', status:'Processed', createdAt:'2026-07-04T09:00:00Z' },
+    { id:'sub-demo-2', formId:'form1', requester:'Mira Chen', department:'Operations', priority:'Normal', payload:{project_name:'Weekly report automation'}, aiAnalysis:{classification:'Project Intake', risk:'low', recommended_owner:'mira', duplicate_risk:'low'}, createdTaskId:'t5', status:'Processed', createdAt:'2026-07-04T10:00:00Z' },
   ],
   docs: [
     { id: 'doc1', title: 'Project Charter', kind: 'Project Plan', owner: 'Adrian Francis', updated: 'Today', linkedTasks: 4 },
@@ -98,6 +102,13 @@ const seedState = {
     { id: 'a2', name: 'Schedule dependent work', category: 'Automate Scheduling', enabled: true, trigger: 'Due date changes', action: 'Shift dependent tasks and flag conflicts' },
     { id: 'a3', name: 'PR updates task status', category: 'Automate Engineering', enabled: false, trigger: 'GitHub PR opened', action: 'Move task to In Review' },
     { id: 'a4', name: 'Lead form to CRM task', category: 'Automate Agencies', enabled: true, trigger: 'New lead form submitted', action: 'Create deal and follow-up task' },
+    { id: 'auto_intake_classify', name: 'AI classify new intake', category: 'AI & Automation', enabled: true, trigger: 'Form submitted', action: 'Analyze request and recommend owner/priority' },
+    { id: 'auto_intake_task', name: 'Create kickoff task from form', category: 'Automate Projects', enabled: true, trigger: 'Form submitted', action: 'Create mapped task with owner and tags' },
+    { id: 'auto_intake_notify', name: 'Notify project owner on intake', category: 'Automate Scheduling', enabled: true, trigger: 'Intake task created', action: 'Notify owner and add intake comment' },
+  ],
+  automationRuns: [
+    { id:'run-demo-1', automationId:'auto_intake_classify', trigger:'Form submitted', sourceType:'form_submission', sourceId:'sub-demo-1', status:'success', summary:'AI classified new intake and recommended owner', details:{form_id:'form1', task_id:'t1'}, createdAt:'2026-07-04T09:01:00Z' },
+    { id:'run-demo-2', automationId:'auto_intake_task', trigger:'Form submitted', sourceType:'form_submission', sourceId:'sub-demo-1', status:'success', summary:'Created kickoff task from mapped form fields', details:{form_id:'form1', task_id:'t1'}, createdAt:'2026-07-04T09:02:00Z' },
   ],
   aiMessages: [],
 };
@@ -164,7 +175,7 @@ async function ensureDemoAuth() {
       const data = await response.json();
       authToken = data.token;
       currentUser = data.user;
-      localStorage.setItem('thing-planner-workos-v040-token', authToken);
+      localStorage.setItem('thing-planner-workos-v050-token', authToken);
       authStatusText = `Demo auth: ${currentUser.display_name || currentUser.email}`;
     }
   } catch (error) {
@@ -182,7 +193,7 @@ async function hydrateFromApi() {
     if (!response.ok) throw new Error('State fetch failed');
     const data = await response.json();
     apiOnline = true;
-    apiStatusText = `${healthJson.version || 'v0.4.0'} ${healthJson.schema || 'API'} connected`;
+    apiStatusText = `${healthJson.version || 'v0.5.0'} ${healthJson.schema || 'API'} connected`;
     await ensureDemoAuth();
     hasBootstrappedApi = true;
     if (data && data.state) {
@@ -206,7 +217,7 @@ async function hydrateFromApi() {
 async function refreshReportDataset(silent=false) {
   if (!apiOnline) {
     lastReportDataset = computeLocalReportDataset();
-    reportStatusText = 'Local report engine';
+    reportStatusText = 'Local intake automation engine';
     if (!silent) toast('Reports refreshed locally');
     return lastReportDataset;
   }
@@ -214,13 +225,13 @@ async function refreshReportDataset(silent=false) {
     const response = await fetch(`${API_BASE}/reports/dashboard?dashboard_id=d1`, { headers: authHeaders(), cache: 'no-store' });
     if (!response.ok) throw new Error('Report API failed');
     lastReportDataset = await response.json();
-    reportStatusText = 'Server report engine synced';
+    reportStatusText = 'Server intake automation engine synced';
     if (!silent) toast('Dashboard report data refreshed from API');
     return lastReportDataset;
   } catch (error) {
     lastReportDataset = computeLocalReportDataset();
     reportStatusText = 'Report API offline - local derived data';
-    if (!silent) toast('Report API offline; using local reports');
+    if (!silent) toast('Report/Form API offline; using local analytics');
     return lastReportDataset;
   }
 }
@@ -298,7 +309,7 @@ function renderTopbar() {
       </button>
       <button class="top-icon" onclick="setModule('planner')">▣</button>
       <button class="top-icon" onclick="toast('No workspace warnings today')">⚠</button>
-      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.4 reporting/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
+      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.5 reporting/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
     </div>
     <div class="global-search-wrap">
       <label class="global-search"><span>⌕</span><input id="globalSearch" placeholder="Search ⌘K" onkeydown="if(event.key==='Enter') globalSearch(this.value)" /></label>
@@ -821,7 +832,7 @@ function computeLocalReportDataset() {
   const risks = tasks.filter(t => t.status === 'BLOCKED' || (t.critical && t.status !== 'DONE'));
   const health = blocked.length || risks.length >= 2 ? 'At Risk' : 'On Track';
   return {
-    schema: 'local-reporting-v0.4',
+    schema: 'local-reporting-v0.5',
     generated_at: new Date().toISOString(),
     summary: { total_tasks: tasks.length, open_tasks: open.length, completed_tasks: done.length, blocked_tasks: blocked.length, billable_hours: Number(billable.toFixed(1)), tracked_hours: Number(tracked.toFixed(1)), estimate_hours: Number(estimate.toFixed(1)), completion_pct: tasks.length ? Math.round(done.length/tasks.length*100) : 0, utilization_pct: estimate ? Math.round(tracked/estimate*100) : 0, health },
     by_status: byStatus,
@@ -846,7 +857,7 @@ function renderDashboardMain() {
   const summary = dataset.summary;
   const cards = state.reportCards && state.reportCards.length ? state.reportCards : seedState.reportCards;
   return `<div class="content wide">
-    <div class="section-title"><div><h2>Executive PMO Dashboard</h2><p style="margin:4px 0 0;color:var(--muted)">v0.4 report engine: live cards, drill-downs, filters, and dashboard actions that update real work.</p></div><div><button class="btn-secondary" onclick="renderDashboardTemplatesOnly()">Templates</button> <button class="btn-secondary" onclick="refreshReportDataset()">⟳ Refresh reports</button> <button class="btn-primary" onclick="addReportCard()">＋ Add Card</button></div></div>
+    <div class="section-title"><div><h2>Executive PMO Dashboard</h2><p style="margin:4px 0 0;color:var(--muted)">v0.5 intake automation engine: live cards, drill-downs, filters, and dashboard actions that update real work.</p></div><div><button class="btn-secondary" onclick="renderDashboardTemplatesOnly()">Templates</button> <button class="btn-secondary" onclick="refreshReportDataset()">⟳ Refresh reports</button> <button class="btn-primary" onclick="addReportCard()">＋ Add Card</button></div></div>
     <div class="report-toolbar">
       <button class="pill-control ${state.reportFilter==='all'?'active':''}" onclick="setReportFilter('all')">All work</button>
       <button class="pill-control ${state.reportFilter==='project1'?'active':''}" onclick="setReportFilter('project1')">Project 1</button>
@@ -1157,7 +1168,7 @@ function renderClipsMain() {
 
 function showDataLayerStatus() {
   const message = apiOnline
-    ? `Connected to the v0.4 reporting API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
+    ? `Connected to the v0.5 reporting API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
     : 'Running in local fallback mode. Start Docker Compose to enable FastAPI persistence.';
   toast(message);
 }
@@ -1167,7 +1178,7 @@ function renderDataLayerCards() {
   const projects = state.spaces.flatMap(s => s.folders || []).flatMap(f => f.lists || []).filter(l => l.kind === 'project').length;
   const comments = state.tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0);
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.4 Reporting + Data</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.5 Reporting + Data</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • report actions enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge green">Auth</span><h3>Demo sign-in</h3><div class="value">${currentUser ? 'Active' : 'Local'}</div><div class="trend">${authStatusText}<br/>Demo email: echofoxx@gmail.com</div><button class="btn-secondary" onclick="ensureDemoAuth(); toast('Demo authentication requested')">Sign in</button></div>
     <div class="kpi-card"><span class="badge green">New</span><h3>API endpoints</h3><p class="trend">/api/reports/dashboard, /api/reports/drilldown, /api/reports/actions, /api/reports/cards</p><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
@@ -1216,6 +1227,192 @@ function dateShort(d) { try { return new Date(d + 'T00:00:00').toLocaleDateStrin
 function uid() { return Math.random().toString(36).slice(2, 9); }
 function escapeHtml(str) { return String(str ?? '').replace(/[&<>'"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[s])); }
 
+// v0.5 Forms + Intake Automation Engine overrides
+function formAnalyticsLocal() {
+  const submissions = state.formSubmissions || [];
+  const byDepartment = {};
+  const byPriority = {};
+  let duplicateWatch = 0;
+  submissions.forEach(s => {
+    byDepartment[s.department || 'Unknown'] = (byDepartment[s.department || 'Unknown'] || 0) + 1;
+    byPriority[s.priority || 'Normal'] = (byPriority[s.priority || 'Normal'] || 0) + 1;
+    if (['medium','high'].includes(s.aiAnalysis?.duplicate_risk)) duplicateWatch++;
+  });
+  return { total: submissions.length, byDepartment, byPriority, duplicateWatch };
+}
+
+function renderFormsMain() {
+  if (formBuilderOpen) return renderFormBuilder();
+  const analytics = formAnalyticsLocal();
+  const latest = (state.formSubmissions || []).slice(0, 5);
+  return `<div class="content wide">
+    <div class="section-title"><div><h2>Forms and Intake Automation</h2><p style="margin:4px 0 0;color:var(--muted)">v0.5 connected forms create work, trigger AI analysis, route requests, and write automation run history.</p></div><div><button class="btn-secondary" onclick="refreshFormsFromApi()">⟳ Refresh</button><button class="btn-primary" onclick="openFormBuilder()">＋ Build Form</button></div></div>
+    <div class="cards-grid">
+      <div class="kpi-card"><span class="badge green">Connected</span><h3>Processed submissions</h3><div class="value">${analytics.total}</div><div class="trend">${state.forms.reduce((s,f)=>s+(f.submissions||0),0)} lifetime submissions across ${state.forms.length} forms</div></div>
+      <div class="kpi-card"><span class="badge purple">AI</span><h3>AI intake analysis</h3><div class="value">${analytics.duplicateWatch}</div><div class="trend">duplicate / related-work reviews suggested</div><button class="btn-secondary" onclick="toast('AI reviewed form submissions and refreshed intake insights')">Analyze</button></div>
+      <div class="kpi-card"><span class="badge green">Automation</span><h3>Automation runs</h3><div class="value">${(state.automationRuns||[]).length}</div><div class="trend">classification • task creation • notification • dashboard refresh</div><button class="btn-secondary" onclick="runManualAutomation()">Run test</button></div>
+      <div class="kpi-card"><span class="badge ${apiOnline?'green':'warn'}">${apiOnline?'API':'Local'}</span><h3>Intake API</h3><p class="trend">/api/forms, /api/forms/{id}/submissions, /api/forms/{id}/analytics, /api/automations/run</p><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
+    </div>
+    <div class="section-title"><h2>Choose a Form template</h2><button class="btn-secondary" onclick="openFormBuilder()">Start from scratch</button></div>
+    <div class="template-grid">
+      ${templateCard('🎛','Feedback Form','Survey and collect feedback with AI sentiment','green', 'openFormBuilder()')}
+      ${templateCard('📋','Project Intake','Create kickoff tasks, route owners, and analyze objectives','pink', 'openFormBuilder()')}
+      ${templateCard('🧺','Order Form','Capture and process client orders','purple', 'openFormBuilder()')}
+      ${templateCard('👤','Job Application','Accept and triage applications','orange', 'openFormBuilder()')}
+      ${templateCard('🧾','IT Requests','Route service requests and severity','blue', 'openFormBuilder()')}
+      ${templateCard('⚡','Automation-backed Form','Build form + trigger chain together','gray', 'openFormBuilder()')}
+    </div>
+    <div class="section-title"><h2>Latest submissions</h2><button class="btn-secondary" onclick="submitFormDemo()">Submit demo intake</button></div>
+    <div class="report-card"><table class="report-table"><thead><tr><th>Request</th><th>Requester</th><th>Department</th><th>Priority</th><th>AI analysis</th><th>Task</th></tr></thead><tbody>
+      ${latest.map(s => `<tr><td><b>${escapeHtml(s.payload?.project_name || s.payload?.request || 'Intake request')}</b><br/><span class="muted">${escapeHtml(s.status || 'Processed')}</span></td><td>${escapeHtml(s.requester || '')}</td><td>${escapeHtml(s.department || '')}</td><td><span class="badge ${s.priority==='Urgent'?'red':s.priority==='High'?'warn':'green'}">${escapeHtml(s.priority || 'Normal')}</span></td><td>${escapeHtml(s.aiAnalysis?.summary || s.aiAnalysis?.classification || 'AI classified and routed')}</td><td><button class="btn-secondary btn-small" onclick="openTask('${s.createdTaskId || ''}')">Open</button></td></tr>`).join('') || `<tr><td colspan="6">No submissions yet. Submit a demo intake to create the first task.</td></tr>`}
+    </tbody></table></div>
+    ${state.aiPromo ? renderBrainPromoWidget() : ''}
+  </div>`;
+}
+
+function renderFormBuilder() {
+  const fields = [
+    ['project_name','Project name','short text','task.name'],
+    ['requester','Requester','person/email','submission.requester'],
+    ['department','Department','dropdown','task.tags + routing'],
+    ['priority','Priority','dropdown','task.priority'],
+    ['desired_due_date','Desired due date','date','task.due'],
+    ['business_objective','Business objective','long text','task.description'],
+    ['attachment','Attachment','file','task.attachment']
+  ];
+  return `<div class="content wide">
+    <div class="section-title"><div><h2>Project Intake Form Builder</h2><p style="margin:4px 0 0;color:var(--muted)">Map fields to task properties, then chain AI classification, task creation, notification, and dashboard update automations.</p></div><div><button class="btn-secondary" onclick="formBuilderOpen=false;render()">Templates</button><button class="btn-secondary" onclick="saveFormSchemaDemo()">Save schema</button><button class="btn-primary" onclick="submitFormDemo()">Submit test response</button></div></div>
+    <div class="form-builder v05-form-builder">
+      <div class="report-card"><h3>Fields and mapping</h3>
+        ${fields.map((f,i) => `<div class="mapping-row"><div><b>${i+1}. ${escapeHtml(f[1])}</b><br/><span>${escapeHtml(f[2])}</span></div><span class="badge">${escapeHtml(f[3])}</span></div>`).join('')}
+        <div class="hr"></div><button class="btn-secondary" onclick="toast('Field added to builder')">＋ Add Field</button>
+        <button class="btn-primary" style="margin-left:8px" onclick="toast('AI suggested conditional priority routing and duplicate detection')">✽ AI Improve</button>
+      </div>
+      <div class="form-preview">
+        <h2>Project Intake</h2><p style="color:var(--muted)">Use this form to centralize new work, create a task, route the owner, and trigger intake automations.</p>
+        <div class="form-field"><label>Project name *</label><input id="formProjectName" placeholder="e.g., Launch customer dashboard" /></div>
+        <div class="form-field"><label>Requester *</label><input id="formRequester" placeholder="Name or email" value="Adrian Francis" /></div>
+        <div class="form-field"><label>Department</label><select id="formDepartment"><option>Product</option><option>Engineering</option><option>Marketing</option><option>Operations</option><option>Finance</option></select></div>
+        <div class="form-field"><label>Priority</label><select id="formPriority"><option>Normal</option><option>High</option><option>Urgent</option></select></div>
+        <div class="form-field"><label>Desired due date</label><input id="formDue" type="date" value="2026-07-15" /></div>
+        <div class="form-field"><label>Business objective</label><textarea id="formObjective" placeholder="What result should this project deliver?"></textarea></div>
+        <button class="btn-primary" onclick="submitFormDemo()">Submit request</button>
+      </div>
+      <div class="report-card"><h3>Automation chain</h3>
+        ${['AI classify request','Create mapped task','Add AI intake comment','Notify recommended owner','Refresh dashboard analytics'].map((step,i)=>`<div class="auto-step"><span>${i+1}</span><div><b>${step}</b><br/><em>${i<3?'Enabled now':'Ready for rule expansion'}</em></div></div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+}
+
+async function submitFormDemo() {
+  const fields = {
+    project_name: ($('#formProjectName')?.value || 'New intake request from Form').trim(),
+    requester: ($('#formRequester')?.value || 'Adrian Francis').trim(),
+    department: $('#formDepartment')?.value || 'Product',
+    priority: $('#formPriority')?.value || 'Normal',
+    desired_due_date: $('#formDue')?.value || '2026-07-15',
+    business_objective: ($('#formObjective')?.value || 'Created from Project Intake Form.').trim()
+  };
+  if (apiOnline) {
+    try {
+      const res = await fetch(`${API_BASE}/forms/form1/submissions`, { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ form_id:'form1', fields }) });
+      if (!res.ok) throw new Error('Form submission failed');
+      const data = await res.json();
+      if (data.state) state = { ...state, ...data.state };
+      await refreshReportDataset(true);
+      toast(`Form submitted → task created + ${data.automation_chain?.length || 0} automations ran`);
+      formBuilderOpen = false; state.module = 'spaces'; state.selectedProject = data.task?.projectId || 'p1'; state.view = 'list'; saveState(); render();
+      return;
+    } catch (err) { console.warn('API form submission failed', err); toast('API unavailable; using local form submission'); }
+  }
+  const owner = fields.department === 'Engineering' ? 'tom' : 'mira';
+  const task = { id: uid(), projectId: 'p1', name: `Intake: ${fields.project_name}`, assignee: owner, due: fields.desired_due_date, priority: fields.priority, status: 'TO DO', comments: [{ by:'AI Intake Agent', text:`AI classified this request as Project Intake and suggested ${memberById(owner).name} as owner.`}], estimate: fields.priority === 'Normal' ? 2 : 4, tracked: 0, billable: false, tags: ['Intake','AI',fields.department], progress: 0, description: fields.business_objective, start: fields.desired_due_date, duration: 3, critical: fields.priority !== 'Normal' };
+  state.tasks.push(task);
+  state.formSubmissions = state.formSubmissions || [];
+  state.formSubmissions.unshift({ id:uid(), formId:'form1', requester:fields.requester, department:fields.department, priority:fields.priority, payload:fields, aiAnalysis:{classification:'Project Intake', risk:fields.priority==='Urgent'?'high':fields.priority==='High'?'medium':'low', recommended_owner:owner, duplicate_risk:'medium', summary:`AI classified '${fields.project_name}' and routed it to ${memberById(owner).name}.`}, createdTaskId:task.id, status:'Processed', createdAt:new Date().toISOString() });
+  state.automationRuns = state.automationRuns || [];
+  ['auto_intake_classify','auto_intake_task','auto_intake_notify'].forEach(id => state.automationRuns.unshift({ id:uid(), automationId:id, trigger:'Form submitted', sourceType:'form_submission', sourceId:state.formSubmissions[0].id, status:'success', summary:`${id.replaceAll('_',' ')} completed`, details:{task_id:task.id}, createdAt:new Date().toISOString() }));
+  const form = state.forms.find(f=>f.id==='form1'); if (form) form.submissions = (form.submissions||0)+1;
+  toast('Form submitted → task created + automations ran');
+  formBuilderOpen = false; state.module = 'spaces'; state.selectedProject = 'p1'; state.view = 'list'; saveState(); render();
+}
+
+async function refreshFormsFromApi() {
+  if (!apiOnline) { toast('Running local form analytics'); render(); return; }
+  try {
+    const [formsRes, subsRes, autosRes] = await Promise.all([
+      fetch(`${API_BASE}/forms`, { headers: authHeaders(), cache:'no-store' }),
+      fetch(`${API_BASE}/forms/form1/submissions`, { headers: authHeaders(), cache:'no-store' }),
+      fetch(`${API_BASE}/automations`, { headers: authHeaders(), cache:'no-store' })
+    ]);
+    if (formsRes.ok) state.forms = (await formsRes.json()).forms || state.forms;
+    if (subsRes.ok) state.formSubmissions = (await subsRes.json()).submissions || state.formSubmissions;
+    if (autosRes.ok) { const data = await autosRes.json(); state.automations = data.automations || state.automations; state.automationRuns = data.runs || state.automationRuns; }
+    toast('Forms, submissions, and automations refreshed'); saveState(); render();
+  } catch (err) { console.warn(err); toast('Could not refresh forms from API'); }
+}
+
+async function saveFormSchemaDemo() {
+  const schema = { mode:'task_intake', target_project_id:'p1', ai_analysis:true, fields:['project_name','requester','department','priority','desired_due_date','business_objective'], automation_chain:['auto_intake_classify','auto_intake_task','auto_intake_notify','auto_intake_dashboard'] };
+  if (apiOnline) {
+    try {
+      const res = await fetch(`${API_BASE}/forms/form1/schema`, { method:'PUT', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ name:'Project Intake', description:'Streamline new project requests with AI routing', schema }) });
+      if (!res.ok) throw new Error('schema save failed');
+      toast('Form schema saved to API'); return;
+    } catch (err) { console.warn(err); }
+  }
+  const f = state.forms.find(x=>x.id==='form1'); if (f) f.schema = schema; toast('Form schema saved locally'); saveState();
+}
+
+async function runManualAutomation() {
+  if (apiOnline) {
+    try {
+      const res = await fetch(`${API_BASE}/automations/run`, { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ automation_id:'auto_intake_dashboard', trigger:'manual', source_type:'forms', source_id:'form1', details:{requested_from:'frontend'} }) });
+      if (res.ok) { const data = await res.json(); if (data.state) state = { ...state, ...data.state }; toast('Manual automation run recorded'); saveState(); render(); return; }
+    } catch (err) { console.warn(err); }
+  }
+  state.automationRuns = state.automationRuns || [];
+  state.automationRuns.unshift({ id:uid(), automationId:'auto_intake_dashboard', trigger:'manual', sourceType:'forms', sourceId:'form1', status:'success', summary:'Manual automation run recorded locally', details:{}, createdAt:new Date().toISOString() });
+  toast('Manual automation run recorded locally'); saveState(); render();
+}
+
+function renderMoreMain() {
+  const runs = (state.automationRuns || []).slice(0, 6);
+  return `<div class="content wide"><div class="section-title"><div><h2>Automations and Connected Tools</h2><p style="margin:4px 0 0;color:var(--muted)">v0.5 adds an intake automation engine with run history, form triggers, and connected task creation.</p></div><button class="btn-primary" onclick="runManualAutomation()">▶ Run Test Automation</button></div>
+    ${renderDataLayerCards()}
+    <div class="section-title"><h2>Automation templates</h2><button class="btn-secondary" onclick="setModule('forms')">Open Forms</button></div>
+    <div class="auto-grid">${state.automations.map(a => `<div class="auto-card"><span class="badge ${a.enabled?'green':''}">${a.enabled?'Enabled':'Paused'}</span><h3>${escapeHtml(a.name)}</h3><p>${escapeHtml(a.category)}<br/><b>When:</b> ${escapeHtml(a.trigger)}<br/><b>Then:</b> ${escapeHtml(a.action)}</p><button class="btn-secondary" onclick="toggleAutomation('${a.id}')">${a.enabled?'Pause':'Enable'}</button></div>`).join('')}
+    ${['Escalate urgent intake','Route agency kickoff','Create approval request','Refresh form dashboard','Create follow-up from report','Notify client success'].map(name => `<div class="auto-card"><span class="badge">Template</span><h3>${name}</h3><p>Trigger, condition, and action template ready to customize.</p><button class="btn-primary" onclick="toast('Automation template added')">Use template</button></div>`).join('')}</div>
+    <div class="section-title"><h2>Automation run history</h2><button class="btn-secondary" onclick="refreshFormsFromApi()">Refresh runs</button></div>
+    <div class="report-card"><table class="report-table"><thead><tr><th>Run</th><th>Trigger</th><th>Source</th><th>Status</th><th>Time</th></tr></thead><tbody>${runs.map(r=>`<tr><td>${escapeHtml(r.summary)}</td><td>${escapeHtml(r.trigger)}</td><td>${escapeHtml(r.sourceType)} / ${escapeHtml(r.sourceId)}</td><td><span class="badge green">${escapeHtml(r.status)}</span></td><td>${new Date(r.createdAt).toLocaleString()}</td></tr>`).join('') || '<tr><td colspan="5">No automation runs yet.</td></tr>'}</tbody></table></div>
+  </div>`;
+}
+
+async function toggleAutomation(id){
+  if (apiOnline) {
+    try {
+      const res = await fetch(`${API_BASE}/automations/${id}/toggle`, { method:'PATCH', headers: authHeaders() });
+      if (res.ok) { const data = await res.json(); if (data.state) state = { ...state, ...data.state }; toast(data.enabled?'Automation enabled':'Automation paused'); saveState(); render(); return; }
+    } catch (err) { console.warn(err); }
+  }
+  const a=state.automations.find(x=>x.id===id); if (!a) return; a.enabled=!a.enabled; toast(a.enabled?'Automation enabled':'Automation paused'); saveState(); render();
+}
+
+function renderDataLayerCards() {
+  const tasks = state.tasks.length;
+  const projects = state.spaces.flatMap(s => s.folders || []).flatMap(f => f.lists || []).filter(l => l.kind === 'project').length;
+  const comments = state.tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0);
+  const submissions = (state.formSubmissions || []).length;
+  const runs = (state.automationRuns || []).length;
+  return `<div class="cards-grid">
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.5 Forms + Automation</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • intake actions enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
+    <div class="kpi-card"><span class="badge purple">Forms</span><h3>Submissions</h3><div class="value">${submissions}</div><div class="trend">AI analysis and task routing available</div><button class="btn-secondary" onclick="setModule('forms')">Open forms</button></div>
+    <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">/api/automations and /api/automations/run</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
+  </div>`;
+}
+
 window.setModule = setModule;
 window.setView = setView;
 window.selectProject = selectProject;
@@ -1235,6 +1432,9 @@ window.runAISuggest = runAISuggest;
 window.createAITasks = createAITasks;
 window.openFormBuilder = openFormBuilder;
 window.submitFormDemo = submitFormDemo;
+window.refreshFormsFromApi = refreshFormsFromApi;
+window.saveFormSchemaDemo = saveFormSchemaDemo;
+window.runManualAutomation = runManualAutomation;
 window.createDashboard = createDashboard;
 window.renderDashboardTemplatesOnly = renderDashboardTemplatesOnly;
 window.setReportFilter = setReportFilter;

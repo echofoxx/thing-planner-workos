@@ -34,7 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 
-APP_VERSION = "v0.4.0"
+APP_VERSION = "v0.5.0"
 DEFAULT_WORKSPACE_ID = "w1"
 DEFAULT_OWNER_ID = "adrian"
 SEED_PATH = Path(__file__).with_name("seed_state.json")
@@ -231,6 +231,22 @@ forms = Table(
     Column("schema", JSON, nullable=False, default=dict),
 )
 
+form_submissions = Table(
+    "form_submissions",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("form_id", String(64), ForeignKey("forms.id"), nullable=False),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("requester", String(255), nullable=False),
+    Column("department", String(255), nullable=False, default="Product"),
+    Column("priority", String(32), nullable=False, default="Normal"),
+    Column("payload", JSON, nullable=False, default=dict),
+    Column("ai_analysis", JSON, nullable=False, default=dict),
+    Column("created_task_id", String(64), ForeignKey("tasks.id"), nullable=True),
+    Column("status", String(64), nullable=False, default="Processed"),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
 docs = Table(
     "docs",
     metadata,
@@ -265,6 +281,21 @@ automations = Table(
     Column("enabled", Boolean, nullable=False, default=True),
     Column("trigger", String(255), nullable=False),
     Column("action", String(255), nullable=False),
+)
+
+automation_runs = Table(
+    "automation_runs",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("automation_id", String(64), ForeignKey("automations.id"), nullable=True),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("trigger", String(255), nullable=False),
+    Column("source_type", String(128), nullable=False),
+    Column("source_id", String(128), nullable=False),
+    Column("status", String(64), nullable=False, default="success"),
+    Column("summary", String(500), nullable=False),
+    Column("details", JSON, nullable=False, default=dict),
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
 activity_logs = Table(
@@ -432,12 +463,41 @@ class IntakePayload(BaseModel):
     department: str = "Product"
     priority: str = "Normal"
     description: str = ""
+    desired_due_date: Optional[str] = None
+    business_objective: str = ""
+
+
+class FormSubmissionPayload(BaseModel):
+    form_id: str = "form1"
+    fields: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FormSchemaPayload(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    form_schema: Dict[str, Any] = Field(default_factory=dict, alias="schema")
+
+
+class AutomationPayload(BaseModel):
+    name: str
+    category: str = "Automate Projects"
+    trigger: str = "Form submitted"
+    action: str = "Create task"
+    enabled: bool = True
+
+
+class AutomationRunPayload(BaseModel):
+    automation_id: Optional[str] = None
+    trigger: str = "manual"
+    source_type: str = "workspace"
+    source_id: str = DEFAULT_WORKSPACE_ID
+    details: Dict[str, Any] = Field(default_factory=dict)
 
 
 app = FastAPI(
     title="Thing Planner WorkOS API",
     version=APP_VERSION,
-    description="v0.4 dashboard reporting engine, report cards, drill-down records, report actions, normalized data, and demo auth for Thing Planner WorkOS.",
+    description="v0.5 forms, intake automation engine, form submissions, automation runs, normalized data, reporting, and demo auth for Thing Planner WorkOS.",
 )
 
 app.add_middleware(
@@ -473,7 +533,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> Opt
 def load_seed_state() -> Dict[str, Any]:
     with SEED_PATH.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    data["version"] = "0.4.0"
+    data["version"] = "0.5.0"
     return data
 
 
@@ -574,16 +634,57 @@ def ensure_seed_data() -> None:
                     card_type=ctype, metric=metric, filters=filters, layout=layout, config={},
                     created_at=utc_now(), updated_at=utc_now(),
                 ))
+        default_form_schemas = {
+            "form1": {
+                "mode": "task_intake",
+                "target_project_id": "p1",
+                "apply_template": "Project Kickoff",
+                "ai_analysis": True,
+                "field_mappings": {"project_name": "task.name", "priority": "task.priority", "department": "task.tags", "business_objective": "task.description"},
+                "fields": [
+                    {"id": "project_name", "label": "Project name", "type": "short_text", "required": True},
+                    {"id": "requester", "label": "Requester", "type": "short_text", "required": True},
+                    {"id": "department", "label": "Department", "type": "dropdown", "options": ["Product", "Engineering", "Marketing", "Operations", "Finance"]},
+                    {"id": "priority", "label": "Priority", "type": "dropdown", "options": ["Normal", "High", "Urgent"]},
+                    {"id": "business_objective", "label": "Business objective", "type": "long_text"},
+                    {"id": "desired_due_date", "label": "Desired due date", "type": "date"}
+                ],
+                "automation_chain": ["auto_intake_classify", "auto_intake_task", "auto_intake_notify"]
+            },
+            "form2": {
+                "mode": "service_request",
+                "target_project_id": "p2",
+                "ai_analysis": True,
+                "field_mappings": {"request": "task.name", "severity": "task.priority"},
+                "fields": [
+                    {"id": "request", "label": "Request", "type": "short_text", "required": True},
+                    {"id": "requester", "label": "Requester", "type": "short_text", "required": True},
+                    {"id": "severity", "label": "Severity", "type": "dropdown", "options": ["Normal", "High", "Urgent"]}
+                ],
+                "automation_chain": ["auto_intake_classify", "auto_intake_task"]
+            }
+        }
         for form in state.get("forms", []):
-            conn.execute(forms.insert().values(id=form.get("id", make_id("form")), workspace_id=DEFAULT_WORKSPACE_ID, name=form.get("name", "Form"), description=form.get("description", ""), submissions=int(form.get("submissions", 0)), favorite=bool(form.get("favorite", False)), schema={"fields": []}))
+            fid = form.get("id", make_id("form"))
+            conn.execute(forms.insert().values(id=fid, workspace_id=DEFAULT_WORKSPACE_ID, name=form.get("name", "Form"), description=form.get("description", ""), submissions=int(form.get("submissions", 0)), favorite=bool(form.get("favorite", False)), schema=default_form_schemas.get(fid, {"fields": []})))
         for doc in state.get("docs", []):
             conn.execute(docs.insert().values(id=doc.get("id", make_id("doc")), workspace_id=DEFAULT_WORKSPACE_ID, title=doc.get("title", "Doc"), kind=doc.get("kind", "Doc"), owner=doc.get("owner", "Adrian Francis"), updated=doc.get("updated", "Today"), linked_tasks=int(doc.get("linkedTasks", 0)), content=""))
         for goal in state.get("goals", []):
             conn.execute(goals.insert().values(id=goal.get("id", make_id("g")), workspace_id=DEFAULT_WORKSPACE_ID, name=goal.get("name", "Goal"), owner=goal.get("owner", "Adrian Francis"), progress=int(goal.get("progress", 0)), status=goal.get("status", "On Track")))
         for auto in state.get("automations", []):
             conn.execute(automations.insert().values(id=auto.get("id", make_id("a")), workspace_id=DEFAULT_WORKSPACE_ID, name=auto.get("name", "Automation"), category=auto.get("category", "Projects"), enabled=bool(auto.get("enabled", True)), trigger=auto.get("trigger", "Task updated"), action=auto.get("action", "Notify owner")))
+        intake_autos = [
+            {"id": "auto_intake_classify", "name": "AI classify new intake", "category": "AI & Automation", "trigger": "Form submitted", "action": "Analyze request, classify department, priority, and duplicate risk"},
+            {"id": "auto_intake_task", "name": "Create kickoff task from form", "category": "Automate Projects", "trigger": "Form submitted", "action": "Create mapped task with owner, due date, and tags"},
+            {"id": "auto_intake_notify", "name": "Notify project owner on intake", "category": "Automate Scheduling", "trigger": "Intake task created", "action": "Notify owner and add intake comment"},
+            {"id": "auto_intake_dashboard", "name": "Update intake dashboard metrics", "category": "Reporting", "trigger": "Submission processed", "action": "Refresh form analytics and dashboard summary"},
+        ]
+        for auto in intake_autos:
+            exists = conn.execute(select(automations.c.id).where(automations.c.id == auto["id"])).first()
+            if not exists:
+                conn.execute(automations.insert().values(workspace_id=DEFAULT_WORKSPACE_ID, enabled=True, **auto))
         seed_custom_fields(conn)
-        log_event(conn, "seed", "workspace", DEFAULT_WORKSPACE_ID, "Seeded normalized v0.4.0 reporting workspace", DEFAULT_OWNER_ID, {"version": APP_VERSION})
+        log_event(conn, "seed", "workspace", DEFAULT_WORKSPACE_ID, "Seeded normalized v0.5.0 intake automation workspace", DEFAULT_OWNER_ID, {"version": APP_VERSION})
 
 
 def ensure_default_report_cards() -> None:
@@ -698,9 +799,11 @@ def serialize_state() -> Dict[str, Any]:
         notification_rows = conn.execute(select(notifications).where(notifications.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(notifications.c.created_at.desc())).all()
         dashboard_rows = conn.execute(select(dashboards).where(dashboards.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
         form_rows = conn.execute(select(forms).where(forms.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+        form_submission_rows = conn.execute(select(form_submissions).where(form_submissions.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(form_submissions.c.created_at.desc())).all()
         doc_rows = conn.execute(select(docs).where(docs.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
         goal_rows = conn.execute(select(goals).where(goals.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
         automation_rows = conn.execute(select(automations).where(automations.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+        automation_run_rows = conn.execute(select(automation_runs).where(automation_runs.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(automation_runs.c.created_at.desc()).limit(20)).all()
         custom_field_rows = conn.execute(select(custom_fields).where(custom_fields.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
 
     comments_by_task: Dict[str, List[Dict[str, Any]]] = {}
@@ -725,7 +828,7 @@ def serialize_state() -> Dict[str, Any]:
         "selectedProject": "p1",
         "helper": True,
         "aiPromo": True,
-        "version": "0.4.0",
+        "version": "0.5.0",
         "workspace": {"name": workspace["name"], "initials": workspace["initials"]},
         "members": [
             {"id": r.id, "name": r.display_name, "initials": r.initials, "avatar": r.avatar, "role": r.role}
@@ -762,10 +865,12 @@ def serialize_state() -> Dict[str, Any]:
             for r in notification_rows
         ],
         "dashboards": [{"id": r.id, "name": r.name, "private": r.is_private, "favorite": r.favorite} for r in dashboard_rows],
-        "forms": [{"id": r.id, "name": r.name, "description": r.description, "submissions": r.submissions, "favorite": r.favorite} for r in form_rows],
+        "forms": [{"id": r.id, "name": r.name, "description": r.description, "submissions": r.submissions, "favorite": r.favorite, "schema": r.schema or {}} for r in form_rows],
+        "formSubmissions": [{"id": r.id, "formId": r.form_id, "requester": r.requester, "department": r.department, "priority": r.priority, "payload": r.payload or {}, "aiAnalysis": r.ai_analysis or {}, "createdTaskId": r.created_task_id, "status": r.status, "createdAt": r.created_at.isoformat()} for r in form_submission_rows],
         "docs": [{"id": r.id, "title": r.title, "kind": r.kind, "owner": r.owner, "updated": r.updated, "linkedTasks": r.linked_tasks} for r in doc_rows],
         "goals": [{"id": r.id, "name": r.name, "owner": r.owner, "progress": r.progress, "status": r.status} for r in goal_rows],
         "automations": [{"id": r.id, "name": r.name, "category": r.category, "enabled": r.enabled, "trigger": r.trigger, "action": r.action} for r in automation_rows],
+        "automationRuns": [{"id": r.id, "automationId": r.automation_id, "trigger": r.trigger, "sourceType": r.source_type, "sourceId": r.source_id, "status": r.status, "summary": r.summary, "details": r.details or {}, "createdAt": r.created_at.isoformat()} for r in automation_run_rows],
         "customFields": [{"id": r.id, "name": r.name, "type": r.type, "scope": r.scope, "options": r.options or []} for r in custom_field_rows],
     }
 
@@ -809,6 +914,9 @@ def health() -> Dict[str, Any]:
                 "custom_fields": conn.execute(select(func.count()).select_from(custom_fields)).scalar_one(),
                 "activity_logs": conn.execute(select(func.count()).select_from(activity_logs)).scalar_one(),
                 "report_cards": conn.execute(select(func.count()).select_from(report_cards)).scalar_one(),
+                "forms": conn.execute(select(func.count()).select_from(forms)).scalar_one(),
+                "form_submissions": conn.execute(select(func.count()).select_from(form_submissions)).scalar_one(),
+                "automation_runs": conn.execute(select(func.count()).select_from(automation_runs)).scalar_one(),
             }
         db_ok = True
     except SQLAlchemyError:
@@ -818,7 +926,7 @@ def health() -> Dict[str, Any]:
         "status": "ok" if db_ok else "degraded",
         "version": APP_VERSION,
         "database": engine.dialect.name,
-        "schema": "reporting-v0.4",
+        "schema": "intake-automation-v0.5",
         "auth": "enabled",
         "workspace_id": DEFAULT_WORKSPACE_ID,
         "tables": table_counts,
@@ -860,9 +968,9 @@ def api_schema() -> Dict[str, Any]:
         "core_entities": [
             "users", "workspaces", "workspace_members", "spaces", "folders", "lists", "task_statuses", "tasks",
             "task_comments", "custom_fields", "custom_field_values", "notifications", "dashboards", "forms",
-            "docs", "goals", "automations", "activity_logs", "sessions", "report_cards",
+            "docs", "goals", "automations", "automation_runs", "activity_logs", "sessions", "report_cards", "form_submissions",
         ],
-        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1-v0.4 frontend state shape. Reports now have derived dashboard endpoints and action APIs.",
+        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1-v0.5 frontend state shape. Reports now have derived dashboard endpoints, action APIs, form submission APIs, and automation run APIs.",
     }
 
 
@@ -1000,36 +1108,236 @@ def api_custom_fields() -> Dict[str, Any]:
     return {"custom_fields": [dict(r._mapping) for r in rows]}
 
 
+
+
+def analyze_intake(fields: Dict[str, Any]) -> Dict[str, Any]:
+    priority = str(fields.get("priority") or "Normal")
+    objective = str(fields.get("business_objective") or fields.get("description") or "")
+    project_name = str(fields.get("project_name") or fields.get("name") or "New request")
+    duplicate_risk = "low"
+    if any(word in project_name.lower() for word in ["dashboard", "intake", "automation"]):
+        duplicate_risk = "medium"
+    risk = "high" if priority == "Urgent" else "medium" if priority == "High" else "low"
+    recommended_owner = "mira" if str(fields.get("department") or "").lower() in ["product", "operations"] else "tom"
+    return {
+        "classification": "Project Intake",
+        "risk": risk,
+        "duplicate_risk": duplicate_risk,
+        "recommended_owner": recommended_owner,
+        "summary": f"AI classified '{project_name}' as project intake with {risk} delivery risk.",
+        "recommended_next_steps": [
+            "Create kickoff task",
+            "Confirm owner and desired due date",
+            "Add business objective to the project description",
+            "Review duplicate risk before project approval",
+        ],
+        "business_objective_detected": bool(objective.strip()),
+    }
+
+
+def record_automation_run(conn, automation_id: Optional[str], trigger: str, source_type: str, source_id: str, summary: str, details: Optional[dict] = None) -> None:
+    conn.execute(automation_runs.insert().values(
+        id=make_id("run"),
+        automation_id=automation_id,
+        workspace_id=DEFAULT_WORKSPACE_ID,
+        trigger=trigger,
+        source_type=source_type,
+        source_id=source_id,
+        status="success",
+        summary=summary,
+        details=details or {},
+        created_at=utc_now(),
+    ))
+
+
+def process_form_submission(conn, form_id: str, fields: Dict[str, Any], actor: str) -> Dict[str, Any]:
+    form_row = conn.execute(select(forms).where(forms.c.id == form_id)).first()
+    if not form_row:
+        raise HTTPException(status_code=404, detail=f"Form {form_id} not found")
+    schema = form_row.schema or {}
+    ai_analysis = analyze_intake(fields)
+    project_name = str(fields.get("project_name") or fields.get("name") or fields.get("request") or "New intake request")
+    requester = str(fields.get("requester") or "Adrian Francis")
+    department = str(fields.get("department") or "Product")
+    priority = str(fields.get("priority") or fields.get("severity") or "Normal")
+    target_project_id = schema.get("target_project_id") or "p1"
+    task = {
+        "id": make_id("t"),
+        "projectId": target_project_id,
+        "name": f"Intake: {project_name}" if not project_name.lower().startswith("intake:") else project_name,
+        "assignee": ai_analysis.get("recommended_owner") or "adrian",
+        "due": str(fields.get("desired_due_date") or "2026-07-15"),
+        "priority": priority,
+        "status": "TO DO",
+        "comments": [],
+        "estimate": 2 if priority == "Normal" else 4,
+        "tracked": 0,
+        "billable": False,
+        "tags": ["Intake", "AI", department],
+        "progress": 0,
+        "description": str(fields.get("business_objective") or fields.get("description") or "Created from connected form intake."),
+        "start": str(fields.get("desired_due_date") or "2026-07-12"),
+        "duration": 2 if priority == "Normal" else 3,
+        "critical": priority in ["Urgent", "High"],
+    }
+    upsert_task_row(conn, task, actor=actor, log=True)
+    submission_id = make_id("sub")
+    conn.execute(form_submissions.insert().values(
+        id=submission_id,
+        form_id=form_id,
+        workspace_id=DEFAULT_WORKSPACE_ID,
+        requester=requester,
+        department=department,
+        priority=priority,
+        payload=fields,
+        ai_analysis=ai_analysis,
+        created_task_id=task["id"],
+        status="Processed",
+        created_at=utc_now(),
+    ))
+    conn.execute(forms.update().where(forms.c.id == form_id).values(submissions=forms.c.submissions + 1))
+    conn.execute(task_comments.insert().values(
+        id=make_id("c"), task_id=task["id"], by_user_id=actor, by_name="AI Intake Agent",
+        text=f"{ai_analysis['summary']} Recommended owner: {ai_analysis['recommended_owner']}. Duplicate risk: {ai_analysis['duplicate_risk']}.", created_at=utc_now(),
+    ))
+    notification_id = make_id("n")
+    conn.execute(notifications.insert().values(
+        id=notification_id, workspace_id=DEFAULT_WORKSPACE_ID, user_id=task["assignee"], type="form", title=f"New intake routed: {project_name}",
+        source="Forms", read=False, tab="Primary", created_at=utc_now(),
+    ))
+    chain = schema.get("automation_chain") or ["auto_intake_classify", "auto_intake_task", "auto_intake_notify"]
+    for auto_id in chain:
+        auto_row = conn.execute(select(automations).where(automations.c.id == auto_id)).first()
+        if auto_row and auto_row.enabled:
+            record_automation_run(conn, auto_id, auto_row.trigger, "form_submission", submission_id, f"{auto_row.name}: {auto_row.action}", {"task_id": task["id"], "form_id": form_id})
+    log_event(conn, "form.submitted", "form", form_id, f"Processed form submission: {project_name}", actor, {"submission_id": submission_id, "task_id": task["id"]})
+    return {"submission_id": submission_id, "task": task, "ai_analysis": ai_analysis, "automation_chain": chain}
+
+
+@app.get("/api/forms")
+def api_forms() -> Dict[str, Any]:
+    with engine.begin() as conn:
+        form_rows = conn.execute(select(forms).where(forms.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+    return {"forms": [{"id": r.id, "name": r.name, "description": r.description, "submissions": r.submissions, "favorite": r.favorite, "schema": r.schema or {}} for r in form_rows]}
+
+
+@app.get("/api/forms/{form_id}")
+def api_form_detail(form_id: str) -> Dict[str, Any]:
+    with engine.begin() as conn:
+        row = conn.execute(select(forms).where(forms.c.id == form_id)).first()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Form {form_id} not found")
+        submission_count = conn.execute(select(func.count()).select_from(form_submissions).where(form_submissions.c.form_id == form_id)).scalar_one()
+    return {"form": {"id": row.id, "name": row.name, "description": row.description, "submissions": submission_count, "favorite": row.favorite, "schema": row.schema or {}}}
+
+
+@app.put("/api/forms/{form_id}/schema")
+def api_update_form_schema(form_id: str, payload: FormSchemaPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        row = conn.execute(select(forms).where(forms.c.id == form_id)).first()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Form {form_id} not found")
+        values = {"schema": payload.form_schema or row.schema or {}}
+        if payload.name:
+            values["name"] = payload.name
+        if payload.description is not None:
+            values["description"] = payload.description
+        conn.execute(forms.update().where(forms.c.id == form_id).values(**values))
+        log_event(conn, "form.schema.updated", "form", form_id, f"Updated form schema: {payload.name or row.name}", actor, {})
+    return {"ok": True, "form": api_form_detail(form_id)["form"]}
+
+
+@app.post("/api/forms/{form_id}/submissions")
+def api_submit_form(form_id: str, payload: FormSubmissionPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        result = process_form_submission(conn, form_id, payload.fields, actor)
+    return {"ok": True, **result, "state": serialize_state()}
+
+
+@app.get("/api/forms/{form_id}/submissions")
+def api_form_submissions(form_id: str) -> Dict[str, Any]:
+    with engine.begin() as conn:
+        rows = conn.execute(select(form_submissions).where(form_submissions.c.form_id == form_id).order_by(form_submissions.c.created_at.desc())).all()
+    return {"submissions": [{"id": r.id, "formId": r.form_id, "requester": r.requester, "department": r.department, "priority": r.priority, "payload": r.payload or {}, "aiAnalysis": r.ai_analysis or {}, "createdTaskId": r.created_task_id, "status": r.status, "createdAt": r.created_at.isoformat()} for r in rows]}
+
+
+@app.get("/api/forms/{form_id}/analytics")
+def api_form_analytics(form_id: str) -> Dict[str, Any]:
+    with engine.begin() as conn:
+        rows = conn.execute(select(form_submissions).where(form_submissions.c.form_id == form_id)).all()
+    by_department: Dict[str, int] = {}
+    by_priority: Dict[str, int] = {}
+    duplicate_watch = 0
+    for r in rows:
+        by_department[r.department] = by_department.get(r.department, 0) + 1
+        by_priority[r.priority] = by_priority.get(r.priority, 0) + 1
+        if (r.ai_analysis or {}).get("duplicate_risk") in ["medium", "high"]:
+            duplicate_watch += 1
+    return {"form_id": form_id, "total": len(rows), "by_department": by_department, "by_priority": by_priority, "duplicate_watch": duplicate_watch, "ai_summary": f"{len(rows)} submissions processed; {duplicate_watch} should be reviewed for duplicate or related work."}
+
+
+@app.get("/api/automations/templates")
+def api_automation_templates() -> Dict[str, Any]:
+    return {"templates": [
+        {"name": "AI classify new intake", "category": "AI & Automation", "trigger": "Form submitted", "action": "Analyze request and recommend owner/priority"},
+        {"name": "Create kickoff task", "category": "Automate Projects", "trigger": "Form submitted", "action": "Create task using field mappings"},
+        {"name": "Notify project owner", "category": "Automate Scheduling", "trigger": "Intake task created", "action": "Notify assignee and add comment"},
+        {"name": "Refresh intake dashboard", "category": "Reporting", "trigger": "Submission processed", "action": "Update form analytics and cards"},
+        {"name": "Escalate urgent intake", "category": "Automate Projects", "trigger": "Priority equals Urgent", "action": "Create risk and notify owner"},
+    ]}
+
+
+@app.get("/api/automations")
+def api_automations() -> Dict[str, Any]:
+    with engine.begin() as conn:
+        rows = conn.execute(select(automations).where(automations.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+        run_rows = conn.execute(select(automation_runs).where(automation_runs.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(automation_runs.c.created_at.desc()).limit(50)).all()
+    return {"automations": [{"id": r.id, "name": r.name, "category": r.category, "enabled": r.enabled, "trigger": r.trigger, "action": r.action} for r in rows], "runs": [{"id": r.id, "automationId": r.automation_id, "trigger": r.trigger, "sourceType": r.source_type, "sourceId": r.source_id, "status": r.status, "summary": r.summary, "details": r.details or {}, "createdAt": r.created_at.isoformat()} for r in run_rows]}
+
+
+@app.post("/api/automations")
+def api_create_automation(payload: AutomationPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    auto = {"id": make_id("a"), "workspace_id": DEFAULT_WORKSPACE_ID, "name": payload.name, "category": payload.category, "enabled": payload.enabled, "trigger": payload.trigger, "action": payload.action}
+    with engine.begin() as conn:
+        conn.execute(automations.insert().values(**auto))
+        log_event(conn, "automation.created", "automation", auto["id"], f"Created automation: {payload.name}", actor, {})
+    return {"ok": True, "automation": {k: v for k, v in auto.items() if k != "workspace_id"}}
+
+
+@app.patch("/api/automations/{automation_id}/toggle")
+def api_toggle_automation(automation_id: str, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        row = conn.execute(select(automations).where(automations.c.id == automation_id)).first()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Automation {automation_id} not found")
+        enabled = not bool(row.enabled)
+        conn.execute(automations.update().where(automations.c.id == automation_id).values(enabled=enabled))
+        log_event(conn, "automation.toggled", "automation", automation_id, f"{'Enabled' if enabled else 'Paused'} automation: {row.name}", actor, {})
+    return {"ok": True, "automation_id": automation_id, "enabled": enabled, "state": serialize_state()}
+
+
+@app.post("/api/automations/run")
+def api_run_automation(payload: AutomationRunPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        summary = f"Manual automation run for {payload.source_type}:{payload.source_id}"
+        record_automation_run(conn, payload.automation_id, payload.trigger, payload.source_type, payload.source_id, summary, payload.details)
+        log_event(conn, "automation.run", payload.source_type, payload.source_id, summary, actor, payload.details)
+    return {"ok": True, "state": serialize_state()}
+
+
 @app.post("/api/forms/project-intake")
 def api_project_intake(payload: IntakePayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
     actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
-    task = {
-        "id": make_id("t"),
-        "projectId": "p1",
-        "name": f"Intake: {payload.project_name}",
-        "assignee": "adrian",
-        "due": "2026-07-15",
-        "priority": payload.priority,
-        "status": "TO DO",
-        "comments": [],
-        "estimate": 2,
-        "tracked": 0,
-        "billable": False,
-        "tags": ["Intake", payload.department],
-        "progress": 0,
-        "description": payload.description,
-        "start": "2026-07-12",
-        "duration": 2,
-        "critical": payload.priority in ["Urgent", "High"],
-    }
+    fields = payload.model_dump()
+    fields["project_name"] = payload.project_name
     with engine.begin() as conn:
-        upsert_task_row(conn, task, actor=actor, log=True)
-        conn.execute(task_comments.insert().values(
-            id=make_id("c"), task_id=task["id"], by_user_id=actor, by_name="Intake Agent",
-            text=f"Submitted by {payload.requester} / {payload.department}.", created_at=utc_now(),
-        ))
-        conn.execute(forms.update().where(forms.c.id == "form1").values(submissions=forms.c.submissions + 1))
-    return {"ok": True, "task": task}
+        result = process_form_submission(conn, "form1", fields, actor)
+    return {"ok": True, **result, "state": serialize_state()}
 
 
 
@@ -1084,7 +1392,7 @@ def compute_report_dataset(filters: Optional[Dict[str, Any]] = None) -> Dict[str
     completion = round((len(done) / len(filtered)) * 100) if filtered else 0
     utilization = round((tracked_hours / estimate_hours) * 100) if estimate_hours else 0
     return {
-        "schema": "reporting-v0.4",
+        "schema": "intake-automation-v0.5",
         "generated_at": utc_now().isoformat(),
         "filters": filters or {},
         "summary": {

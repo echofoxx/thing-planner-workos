@@ -4,7 +4,7 @@
   "selectedProject": "p1",
   "helper": true,
   "aiPromo": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "workspace": {
     "name": "Adrian Francis's Workspace",
     "initials": "A"
@@ -436,5 +436,8 @@
       "metric": "work_table"
     }
   ],
-  "reportFilter": "all"
+  "reportFilter": "all",
+  "formSubmissions": [],
+  "automationRuns": [],
+  "release": "v0.5.0"
 }

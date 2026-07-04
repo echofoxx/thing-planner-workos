@@ -1,60 +1,65 @@
-# Thing Planner WorkOS v0.4.0
+# Thing Planner WorkOS v0.5.0
 
-Thing Planner WorkOS is an independently branded, ClickUp-style project/work management platform prototype. **v0.4.0** upgrades the product from a normalized data/auth foundation into a **dashboard and reporting engine** where reports are connected to source tasks and can update work directly from dashboard cards.
+**Thing Planner WorkOS** is an AI-native project management/work operating system prototype inspired by modern all-in-one productivity platforms. It includes a ClickUp-style workspace shell, tasks, boards, dashboards, reports, forms, automations, docs, planner, AI assistant, and a normalized API/data foundation.
 
-## What is new in v0.4.0
+## v0.5.0 release theme
 
-- v0.4 dashboard/reporting engine.
-- Server-side report dataset endpoint: `/api/reports/dashboard`.
-- Server-side report summary endpoint with filters: `/api/reports/summary`.
-- Drill-down endpoint: `/api/reports/drilldown`.
-- Report card registry endpoint: `/api/reports/cards`.
-- Report action endpoint: `/api/reports/actions`.
-- New normalized `report_cards` table.
-- Default seeded report cards:
-  - Open Tasks
-  - Blocked Work
-  - Billable Hours
-  - Project Health
-  - Work by Status
-  - Team Productivity
-  - Actionable Work Table
-- Dashboard report filters for All Work, Project 1, and Project 2.
-- Dashboard cards now support drill-down into source records.
-- Actionable report tables allow users to update status, owner, due date, billable flag, and open source tasks.
-- Risk and blocker action queue.
-- AI Project Health card tied to live task data.
-- Report API fallback: if the API is offline, the frontend derives reports locally.
-- Health endpoint now reports `reporting-v0.4` schema and report card table counts.
+**Forms + Intake Automation Engine**
 
-## What is preserved from v0.3.0
+v0.5.0 makes Forms operational. Form submissions now create mapped tasks, run AI intake analysis, notify owners, record automation run history, and feed dashboard/reporting data.
 
-- FastAPI backend.
-- PostgreSQL Docker service.
-- SQLite fallback compose file.
-- Normalized SQLAlchemy schema.
-- Demo authentication.
-- Demo account: `echofoxx@gmail.com` / `thingplanner`.
-- Workspace members and permissions seed model.
-- `/api/state` compatibility endpoint.
-- Task CRUD API.
-- Comments API.
-- Project intake API.
-- Activity logs.
-- Custom fields.
-- Frontend localStorage fallback.
-- Purple ClickUp-style global rail and contextual sidebars.
-- Spaces, List, Board, Calendar, Gantt, and Table views.
-- Forms, AI, planner, docs, goals, whiteboards, teams, clips, and automation starter modules.
+## What is included
 
-## Run with Docker Compose, PostgreSQL mode
+- ClickUp-style UI shell:
+  - purple global navigation rail
+  - contextual sidebars
+  - top search and AI bar
+  - Spaces, Home, Forms, Dashboards, Planner, AI, Docs, Goals, Teams, Whiteboards, and More modules
+- Task and project management:
+  - Spaces / folders / project lists
+  - List, Board, Calendar, Gantt, and Table views
+  - Task drawer
+  - comments, assignees, statuses, priorities, tags, estimates, tracked time, billable flag
+- v0.2+ API/data layer:
+  - FastAPI backend
+  - PostgreSQL Docker service
+  - SQLite fallback compose file
+  - `/api/state` compatibility layer
+- v0.3+ normalized database/auth foundation:
+  - users, workspaces, members, spaces, folders, lists, task statuses, tasks, comments, custom fields, notifications, dashboards, forms, docs, goals, automations, sessions, activity logs
+  - demo login with bearer token
+- v0.4+ reporting engine:
+  - report cards
+  - server-side dashboard dataset
+  - drill-down records
+  - dashboard actions that update tasks
+- v0.5 forms/intake automation:
+  - normalized `form_submissions`
+  - normalized `automation_runs`
+  - form schemas and field mappings
+  - connected Project Intake form
+  - AI intake analysis stub
+  - automatic task creation
+  - intake comments and owner notifications
+  - automation templates
+  - automation run history
+  - form analytics by department, priority, and duplicate watch
 
-From PowerShell:
+## Demo login
+
+```text
+Email: echofoxx@gmail.com
+Password: thingplanner
+```
+
+The frontend auto-runs demo auth when the API is available.
+
+## Run with PostgreSQL
 
 ```powershell
 cd C:\docker
-Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.4.0.zip" "C:\docker\thing-planner-workos-v0.4.0"
-cd C:\docker\thing-planner-workos-v0.4.0\thing-planner-workos-v0.4.0
+Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.5.0.zip" "C:\docker\thing-planner-workos-v0.5.0"
+cd C:\docker\thing-planner-workos-v0.5.0\thing-planner-workos-v0.5.0
 docker compose up --build -d
 ```
 
@@ -64,143 +69,108 @@ Open the app:
 http://localhost:8098
 ```
 
-Open the API directly:
+API health:
 
 ```text
 http://localhost:8099/api/health
 ```
 
-Open API docs through the web proxy:
+API docs:
 
 ```text
 http://localhost:8098/api/docs
 ```
 
-## Run with SQLite fallback instead of PostgreSQL
+## SQLite fallback
+
+Use this if you want a simpler local backend without PostgreSQL:
 
 ```powershell
 docker compose -f docker-compose.sqlite.yml up --build -d
 ```
 
-This runs the same API but persists to a Docker volume-backed SQLite database.
+## Key v0.5 API endpoints
 
-## Demo authentication
-
-The frontend automatically requests demo auth when the API is online. You can also test directly:
-
-```powershell
-Invoke-RestMethod -Method POST http://localhost:8099/api/auth/demo-login
-```
-
-Manual login payload:
-
-```json
-{
-  "email": "echofoxx@gmail.com",
-  "password": "thingplanner"
-}
-```
-
-## Reporting API endpoints
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/api/reports/summary` | Derived report metrics with optional project/status/assignee/tag filters |
-| GET | `/api/reports/dashboard` | Dashboard metadata, report cards, live dataset, and supported actions |
-| GET | `/api/reports/drilldown?metric=blocked_tasks` | Source task records behind a metric |
-| GET | `/api/reports/cards` | Report card definitions for a dashboard |
-| POST | `/api/reports/cards` | Create a new report card |
-| POST | `/api/reports/actions` | Apply a dashboard action to a source task |
-
-Supported report actions:
-
-- `set_status`
-- `assign`
-- `set_due`
-- `toggle_billable`
-- `add_comment`
-- `create_followup`
-
-Example report action:
-
-```json
-{
-  "task_id": "t5",
-  "action": "set_status",
-  "value": "IN PROGRESS"
-}
-```
-
-## Other API endpoints
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/api/health` | Backend/database/auth/schema status |
-| POST | `/api/auth/login` | Demo login with email/password |
-| POST | `/api/auth/demo-login` | One-click demo auth |
-| GET | `/api/auth/me` | Current bearer-token user |
-| GET | `/api/schema` | Normalized schema description |
-| GET | `/api/workspaces/current` | Workspace, members, hierarchy, custom fields |
-| GET | `/api/members` | Workspace member list |
-| GET | `/api/permissions` | Role and permission seed data |
-| GET | `/api/activity` | Activity/audit feed |
-| GET | `/api/custom-fields` | Custom field definitions |
-| GET | `/api/state` | Load complete UI-compatible workspace state from normalized tables |
-| PUT | `/api/state` | Sync UI state back into normalized tables |
-| POST | `/api/reset` | Reset database and reseed normalized tables |
-| GET | `/api/tasks` | List tasks, optionally filtered by project/status/assignee |
-| POST | `/api/tasks` | Create task |
-| PATCH | `/api/tasks/{task_id}` | Update task fields |
-| DELETE | `/api/tasks/{task_id}` | Delete task |
-| POST | `/api/tasks/{task_id}/comments` | Add comment |
-| POST | `/api/forms/project-intake` | Create task from intake form |
-| POST | `/api/ai/project-summary` | AI summary stub |
-
-## Data model status
-
-v0.4.0 keeps the v0.3 normalized schema and adds reporting structures.
-
-Key normalized entities:
+### Forms
 
 ```text
-users, workspaces, workspace_members, spaces, folders, lists, task_statuses,
-tasks, task_comments, custom_fields, custom_field_values, notifications,
-dashboards, report_cards, forms, docs, goals, automations, activity_logs, sessions
+GET  /api/forms
+GET  /api/forms/{form_id}
+PUT  /api/forms/{form_id}/schema
+POST /api/forms/{form_id}/submissions
+GET  /api/forms/{form_id}/submissions
+GET  /api/forms/{form_id}/analytics
+POST /api/forms/project-intake
 ```
 
-## GitHub update commands
+### Automations
 
-Use a clean working repo folder such as:
+```text
+GET   /api/automations
+POST  /api/automations
+PATCH /api/automations/{automation_id}/toggle
+POST  /api/automations/run
+GET   /api/automations/templates
+```
+
+### Reporting
+
+```text
+GET  /api/reports/dashboard
+GET  /api/reports/drilldown
+POST /api/reports/actions
+GET  /api/reports/cards
+POST /api/reports/cards
+```
+
+## Suggested GitHub update
+
+Use your clean repo folder:
 
 ```powershell
-C:\docker\thing-planner-workos-git
+cd C:\docker\thing-planner-workos-git
 ```
 
-Copy the v0.4.0 files into that clean repo, then run:
+Copy the v0.5.0 files into the repo:
+
+```powershell
+robocopy `
+  "C:\docker\thing-planner-workos-v0.5.0\thing-planner-workos-v0.5.0" `
+  "C:\docker\thing-planner-workos-git" `
+  /MIR `
+  /XD .git .venv __pycache__ `
+  /XF *.pyc
+```
+
+Commit and tag:
 
 ```powershell
 git status
 git add .
-git commit -m "Release Thing Planner WorkOS v0.4.0"
+git commit -m "Release Thing Planner WorkOS v0.5.0"
 git push origin main
-git tag -f v0.4.0
-git push origin v0.4.0 --force
+
+git tag -f v0.5.0
+git push origin v0.5.0 --force
 ```
 
-## Recommended next release: v0.5.0
+## Validation performed
 
-v0.5.0 should focus on **forms and intake automation**:
+- `python3 -m py_compile backend/app/main.py`
+- `node --check assets/app.js`
+- FastAPI SQLite smoke test against health, state, forms, submissions, analytics, automations, templates, reports, login, form submission, and manual automation run.
 
-- Normalized form builder tables.
-- Form field schema editor.
-- Submission records.
-- Field-to-task mapping.
-- Conditional logic.
-- Public form submission page.
-- AI form classification.
-- Intake dashboards.
-- Form-triggered automations.
+## Next recommended build
 
-## Important product note
+**v0.6.0 Planner + AI Scheduling Engine**
 
-This project is independently branded. It intentionally avoids using ClickUp logos, protected assets, product identity, or exact brand copy. The UX pattern is inspired by modern work management tools and your screenshots, but the product should continue as its own WorkOS.
+Recommended scope:
+
+- calendar event model
+- planner database tables
+- task time-blocking
+- working hours and capacity preferences
+- AI daily plan endpoint
+- schedule conflict detection
+- auto-reschedule suggestions
+- planner UI upgrades

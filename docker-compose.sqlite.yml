@@ -4,7 +4,7 @@ services:
     container_name: thing-planner-api
     environment:
       DATABASE_URL: sqlite:////data/workos.db
-      SECRET_KEY: thing-planner-workos-v040-local-secret
+      SECRET_KEY: thing-planner-workos-v050-local-secret
     volumes:
       - thing_planner_sqlite:/data
     ports:

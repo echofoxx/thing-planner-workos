@@ -525,3 +525,19 @@ button { cursor: pointer; }
   .report-status { flex-basis:100%; margin-left:0; }
   .dashboard-grid.v040 { grid-template-columns: 1fr; }
 }
+
+/* v0.5 Forms + Intake Automation Engine */
+.v05-form-builder { grid-template-columns: minmax(260px, 1fr) minmax(380px, 1.2fr) minmax(260px, .9fr); align-items: start; }
+.mapping-row, .auto-step {
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin:8px 0; background:#fff;
+}
+.mapping-row span:not(.badge), .auto-step em { color: var(--muted); font-style: normal; font-size: 12px; }
+.auto-step { justify-content:flex-start; }
+.auto-step > span:first-child {
+  width:26px; height:26px; border-radius:9px; background:var(--primary-3); color:var(--primary); display:inline-flex; align-items:center; justify-content:center; font-weight:800;
+}
+.badge.purple { background:#eee9ff; color:#6846e7; }
+.badge.red { background:#ffe7e7; color:#c92228; }
+.muted { color: var(--muted); font-size: 12px; }
+@media (max-width: 1180px) { .v05-form-builder { grid-template-columns: 1fr; } }

@@ -1,0 +1,7 @@
+services:
+  thing-planner-workos:
+    build: .
+    container_name: thing-planner-workos
+    ports:
+      - "8098:80"
+    restart: unless-stopped

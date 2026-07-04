@@ -1,0 +1,3 @@
+Thing Planner WorkOS v0.1.0
+Release: Foundation prototype
+Scope: ClickUp-inspired independent WorkOS shell, Spaces/Tasks, Dashboards, Forms, AI Assistant, Planner, Automations, Docs, Whiteboards, Goals, Teams, local persistence.

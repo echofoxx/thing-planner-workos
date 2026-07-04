@@ -34,7 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 
-APP_VERSION = "v0.9.3"
+APP_VERSION = "v0.9.4"
 DEFAULT_WORKSPACE_ID = "w1"
 DEFAULT_OWNER_ID = "adrian"
 SEED_PATH = Path(__file__).with_name("seed_state.json")
@@ -866,7 +866,7 @@ class MindMapNodePayload(BaseModel):
 app = FastAPI(
     title="Thing Planner WorkOS API",
     version=APP_VERSION,
-    description="v0.9.3 functional hardening: connected workspace shell, persistent UI actions, API/state sync, planner, docs, Gantt, forms, and visual collaboration.",
+    description="v0.9.4 functional verification release: connected workspace shell, persistent UI actions, API/state sync, planner, docs, Gantt, forms, and visual collaboration.",
 )
 
 app.add_middleware(
@@ -906,7 +906,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> Opt
 def load_seed_state() -> Dict[str, Any]:
     with SEED_PATH.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    data["version"] = "0.9.3"
+    data["version"] = "0.9.4"
     return data
 
 
@@ -1452,7 +1452,7 @@ def serialize_state() -> Dict[str, Any]:
         "visualTab": "whiteboard",
         "helper": False,
         "aiPromo": False,
-        "version": "0.9.3",
+        "version": "0.9.4",
         "workspace": {"name": workspace["name"], "initials": workspace["initials"]},
         "members": [
             {"id": r.id, "name": r.display_name, "initials": r.initials, "avatar": r.avatar, "role": r.role}

@@ -1,10 +1,10 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const STORAGE_KEY = 'thing-planner-workos-v093-state';
-const LEGACY_STORAGE_KEYS = ['thing-planner-workos-v092-state', 'thing-planner-workos-v091-state'];
-const AUTH_TOKEN_KEY = 'thing-planner-workos-v093-token';
-const LEGACY_AUTH_TOKEN_KEYS = ['thing-planner-workos-v092-token', 'thing-planner-workos-v091-token'];
+const STORAGE_KEY = 'thing-planner-workos-v094-state';
+const LEGACY_STORAGE_KEYS = ['thing-planner-workos-v093-state', 'thing-planner-workos-v092-state', 'thing-planner-workos-v091-state'];
+const AUTH_TOKEN_KEY = 'thing-planner-workos-v094-token';
+const LEGACY_AUTH_TOKEN_KEYS = ['thing-planner-workos-v093-token', 'thing-planner-workos-v092-token', 'thing-planner-workos-v091-token'];
 const API_BASE = window.THING_PLANNER_API_BASE || '/api';
 let apiOnline = false;
 let apiStatusText = 'Connecting to API…';
@@ -28,7 +28,7 @@ const seedState = {
   knowledgeQuery: '',
   helper: false,
   aiPromo: false,
-  version: '0.9.3',
+  version: '0.9.4',
   workspace: {
     name: "Adrian Francis's Workspace",
     initials: 'A',
@@ -152,8 +152,8 @@ function loadState() {
 }
 
 function ensureAppState() {
-  state.version = '0.9.3';
-  // v0.9.3 keeps the workspace clean: no feedback or promo overlays by default.
+  state.version = '0.9.4';
+  // v0.9.4 keeps the workspace clean: no feedback or promo overlays by default.
   state.helper = false;
   state.aiPromo = false;
   state.members = Array.isArray(state.members) ? state.members : structuredClone(seedState.members);
@@ -258,7 +258,7 @@ async function bootstrapConnection(showFeedback=false, attempt=0) {
       const healthJson = await health.json();
       window.THING_PLANNER_API_BASE = base;
       apiOnline = true;
-      apiStatusText = `${healthJson.version || 'v0.9.3'} API connected`;
+      apiStatusText = `${healthJson.version || 'v0.9.4'} API connected`;
       const stateResponse = await fetch(`${base}/state`, { cache: 'no-store' });
       if (stateResponse.ok) {
         const data = await stateResponse.json();
@@ -1299,7 +1299,7 @@ function renderInviteMain() {
   return `<div class="content"><div class="empty-center"><div class="big-icon">♙+</div><h2>Invite your team</h2><div>Add teammates, guests, agencies, clients, or stakeholders to collaborate in controlled workspaces.</div><br/><button class="btn-primary" onclick="inviteTeamDemo()">Invite people</button></div></div>`;
 }
 function renderUpgradeMain() {
-  return `<div class="content"><div class="template-wrap"><h1>Upgrade your WorkOS</h1><p>Unlock Super Agents, unlimited dashboards, advanced automations, guests, audit logs, and enterprise controls.</p><div class="template-grid">${templateCard('✽','AI Plus','More AI usage, agents, and premium models','purple', 'upgradePlanDemo("AI Plus")')}${templateCard('⚡','Automation Pro','Advanced rules and connected workflows','orange','upgradePlanDemo("Automation Pro")')}${templateCard('🔐','Enterprise','SSO, audit logs, roles, governance','blue','upgradePlanDemo("Enterprise")')}</div></div></div>`;
+  return `<div class="content"><div class="template-wrap"><h1>Upgrade your WorkOS</h1><p>Unlock Super Agents, unlimited dashboards, advanced automations, guests, audit logs, and enterprise controls.</p><div class="template-grid">${templateCard('✽','AI Plus','More AI usage, agents, and premium models','purple', "upgradePlanDemo('AI Plus')")}${templateCard('⚡','Automation Pro','Advanced rules and connected workflows','orange',"upgradePlanDemo('Automation Pro')")}${templateCard('🔐','Enterprise','SSO, audit logs, roles, governance','blue',"upgradePlanDemo('Enterprise')")}</div></div></div>`;
 }
 
 function renderFeedbackWidget() {
@@ -1617,7 +1617,7 @@ async function addCalendarMeetingDemo(){ ensurePlannerState(); const event={titl
 
 
 
-/* v0.9.3 Visual Collaboration / Whiteboards + Canvas + Mind Maps */
+/* v0.9.4 Visual Collaboration / Whiteboards + Canvas + Mind Maps */
 function defaultWhiteboardSeed(){
   return [{
     id:'wb1', name:'Launch Planning Board', icon:'✎', owner:'Adrian Francis', updated:'Today', favorite:true,
@@ -1737,7 +1737,7 @@ function selectVisualObject(id){ state.selectedVisualObject=id; toast('Selected 
 function createWhiteboard(){ ensureWhiteboardState(); const id=uid(); state.whiteboards.unshift({id, name:`New Strategy Board ${state.whiteboards.length+1}`, icon:'✎', owner:'Adrian Francis', updated:'Now', favorite:false, objects:[], edges:[], canvasCards:[], mindMap:{root:{id:'root',label:'New Strategy'},nodes:[]}}); state.selectedWhiteboard=id; saveState(); render(); toast('Whiteboard created'); }
 function addSticky(){ const w=selectedWhiteboard(); const id=uid(); w.objects=w.objects||[]; w.objects.push({id,type:'sticky',text:'New idea\n\nClick AI summarize or convert to task.',color:['yellow','blue','pink','green'][w.objects.length%4],x:90+(w.objects.length*42)%650,y:80+(w.objects.length*58)%330,w:182,h:126}); w.updated='Now'; saveState(); render(); toast('Sticky note added'); }
 function addCanvasCard(){ const w=selectedWhiteboard(); w.canvasCards=w.canvasCards||[]; w.canvasCards.push({id:uid(),title:'Live Work Card',kind:'Task Rollup',metric:`${state.tasks.filter(t=>t.status!=='DONE').length} open`,x:80+(w.canvasCards.length*60)%540,y:100+(w.canvasCards.length*72)%300,linkedType:'dashboard',linkedId:'d1'}); w.updated='Now'; saveState(); render(); toast('Canvas card added'); }
-function convertStickyToTask(){ const w=selectedWhiteboard(); const obj=(w.objects||[]).find(o=>o.id===state.selectedVisualObject) || (w.objects||[]).find(o=>o.type==='sticky'&&!o.taskId) || (w.objects||[])[0]; if(!obj){ toast('Add a sticky note first'); return; } const title=firstLine(obj.text); const task={id:uid(), projectId:state.selectedProject||'p1', name:title, assignee:'adrian', due:new Date(Date.now()+86400000*5).toISOString().slice(0,10), priority:'Normal', status:'TO DO', comments:[{by:'WorkMind',text:'Created from v0.9.3 visual collaboration board.'}], estimate:2, tracked:0, billable:false, tags:['Whiteboard'], progress:0, description:restLines(obj.text), start:new Date().toISOString().slice(0,10), duration:2, critical:false}; state.tasks.push(task); obj.taskId=task.id; w.updated='Now'; saveState(); render(); toast('Sticky converted to task'); }
+function convertStickyToTask(){ const w=selectedWhiteboard(); const obj=(w.objects||[]).find(o=>o.id===state.selectedVisualObject) || (w.objects||[]).find(o=>o.type==='sticky'&&!o.taskId) || (w.objects||[])[0]; if(!obj){ toast('Add a sticky note first'); return; } const title=firstLine(obj.text); const task={id:uid(), projectId:state.selectedProject||'p1', name:title, assignee:'adrian', due:new Date(Date.now()+86400000*5).toISOString().slice(0,10), priority:'Normal', status:'TO DO', comments:[{by:'WorkMind',text:'Created from v0.9.4 visual collaboration board.'}], estimate:2, tracked:0, billable:false, tags:['Whiteboard'], progress:0, description:restLines(obj.text), start:new Date().toISOString().slice(0,10), duration:2, critical:false}; state.tasks.push(task); obj.taskId=task.id; w.updated='Now'; saveState(); render(); toast('Sticky converted to task'); }
 function linkObjectToTask(){ const w=selectedWhiteboard(); const obj=(w.objects||[]).find(o=>o.id===state.selectedVisualObject) || (w.objects||[])[0]; const task=state.tasks.find(t=>t.status==='BLOCKED') || state.tasks.find(t=>t.status!=='DONE'); if(!obj||!task){ toast('Need an object and a task to link'); return; } obj.taskId=task.id; w.updated='Now'; saveState(); render(); toast(`Linked to ${task.name}`); }
 function openCanvasLink(type,id){ if(type==='module'){ setModule(id); return; } if(type==='list' || type==='project'){ state.selectedProject=id || firstProjectId(); state.module='spaces'; state.view='list'; render(); return; } if(type==='task'){ openTask(id); return; } if(type==='doc'){ state.selectedDoc=id; setModule('docs'); return; } if(type==='form'){ setModule('forms'); return; } if(type==='dashboard'){ setModule('dashboards'); return; } if(type==='view' && ['list','board','calendar','gantt','table'].includes(id)){ state.module='spaces'; state.view=id; render(); return; } if(type==='gantt'||id==='gantt'){ state.module='spaces'; state.view='gantt'; render(); return; } if(type==='action' && String(id||'').includes('ai')){ setModule('ai'); return; } toast(`${type || 'Link'} opened`); }
 function localWhiteboardAI(w){ const stats=whiteboardStats(w); const blockers=state.tasks.filter(t=>t.status==='BLOCKED'); return {summary:`${w.name} has ${stats.objects} objects, ${stats.edges} relationships, ${stats.linkedTasks} linked task references, and ${stats.canvasCards} canvas cards. AI recommends converting unlinked ideas to tasks and reviewing ${blockers.length} blocker(s).`, actions:['Convert the highest-value sticky into a task','Link the Form Intake note to the project intake workflow','Review critical-path blockers before the next status report'], risks:blockers.map(t=>t.name).slice(0,3)}; }
@@ -1747,7 +1747,7 @@ async function refreshWhiteboardsFromApi(){ ensureWhiteboardState(); if(!apiOnli
 
 function showDataLayerStatus() {
   const message = apiOnline
-    ? `Connected to the v0.9.3 visual collaboration API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
+    ? `Connected to the v0.9.4 visual collaboration API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
     : 'Running in local fallback mode. Start Docker Compose to enable FastAPI persistence for whiteboards, canvas cards, and mind maps.';
   toast(message);
 }
@@ -1761,7 +1761,7 @@ function renderDataLayerCards() {
   const whiteboardCount = (state.whiteboards || []).length;
   const visualObjects = (state.whiteboards || []).reduce((sum,w)=>sum+(w.objects||[]).length+(w.canvasCards||[]).length+(w.mindMap?.nodes||[]).length,0);
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9.3 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.9.4 Visual Collaboration</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • visual links enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Whiteboards</span><h3>Visual objects</h3><div class="value">${visualObjects}</div><div class="trend">${whiteboardCount} boards • canvas cards and mind maps</div><button class="btn-secondary" onclick="setModule('whiteboards')">Open whiteboards</button></div>
     <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/whiteboards, /api/docs, /api/gantt</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>

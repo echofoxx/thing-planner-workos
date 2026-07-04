@@ -1,20 +1,24 @@
-# Thing Planner WorkOS v0.9.3 Functional Release
+# Thing Planner WorkOS v0.9.4 Functional Release
 
 Thing Planner WorkOS is a local-first, API-backed project/work operating system prototype with a ClickUp-style workspace shell, Spaces, tasks, boards, dashboards, reports, forms, automations, planner, Gantt scheduling, docs, knowledge, teams, goals, clips, whiteboards, canvas planning, and mind maps.
 
-This v0.9.3 package is a functional hardening pass over the attached v0.9.2 build. The goal of this release is to remove partially wired behavior, make the primary workflows actually change state, and ensure frontend-created work can persist through the backend API.
+This v0.9.4 package is a functional verification release over v0.9.3. Every backend endpoint, every frontend module render, all 550+ inline UI handlers, and the full frontend-to-backend state sync path were exercised in automated tests, and one confirmed defect was fixed.
 
-## What was fixed in v0.9.3
+## What was verified and fixed in v0.9.4
 
-- Updated stale v0.9.1/v0.9.2 labels, storage keys, auth token keys, page title, and API status text to v0.9.3.
-- Removed duplicate older JavaScript function definitions that were silently overriding or confusing feature behavior.
-- Disabled the distracting helper/promo popups by default, including after API hydration.
-- Replaced placeholder actions with functional demo actions for Spaces, project lists, report cards, form builder fields, AI form improvements, automation templates, weekly planning, AI agent creation, team standups, goals, clips, invites, upgrades, and new automations.
-- Reworked the Spaces tree so it renders dynamic spaces, folders, and lists instead of only hard-coded Project 1 / Project 2 links.
-- Fixed Canvas/Mind Map navigation so linked list/project/view cards open the relevant module or view.
-- Hardened `/api/state` persistence so frontend-created members, spaces, folders, lists, dashboards, goals, forms, submissions, automations, automation runs, tasks, comments, notifications, and whiteboards sync into normalized tables without foreign-key errors.
-- Added a backend safeguard so new frontend project/list IDs are created before tasks reference them.
-- Improved frontend API sync so failed `/api/state` saves are detected instead of silently appearing successful.
+**Fixed:**
+
+- Upgrade module: the three plan cards (AI Plus, Automation Pro, Enterprise) threw a JavaScript SyntaxError on click. Their onclick actions embedded double quotes inside a double-quoted HTML attribute, truncating the handler to `upgradePlanDemo(`. Quote nesting corrected; all three cards now invoke the upgrade flow.
+- Rolled version labels, page title, storage/auth token keys (with legacy v0.9.1–v0.9.3 migration), and API status text to v0.9.4.
+
+**Verified functional by automated test:**
+
+- Backend: 47-check API smoke suite across auth, tasks, comments, forms, submissions, analytics, automations, planner, reports, Gantt, docs, and state — all endpoint groups pass against a fresh SQLite database.
+- State persistence: frontend-shaped `/api/state` PUT round-trip persists new tasks (including tasks referencing brand-new frontend-created lists), spaces/folders/lists, members, goals, form submissions, automations, notifications, comments, and whiteboards into normalized tables with zero integrity errors.
+- Frontend: all 15 modules and all 5 Spaces views render headlessly; 559 real click/change event dispatches across every module produce zero handler crashes (after the Upgrade fix).
+- Workflows: add task, status update, task drawer, comments, planner plan-my-day, focus blocks, AI response, form intake submission, automation creation from template, goal creation, doc creation from template, whiteboard tabs, and localStorage persistence all mutate state correctly in local mode.
+- Full stack: live browser-equivalent session against the running API confirmed bootstrap/hydration, demo auth, debounced UI-to-backend state sync, doc creation through the API, planner scheduling through the API, and form submission persistence — with zero server errors.
+
 
 ## Primary modules
 
@@ -35,7 +39,7 @@ Additional modules such as Automations, Goals, Clips, Invite, and Upgrade remain
 ## Running with Docker + PostgreSQL
 
 ```powershell
-cd C:/docker/thing-planner-workos-v0.9.3-functional
+cd C:/docker/thing-planner-workos-v0.9.4-functional
 docker compose up --build -d
 ```
 
@@ -52,7 +56,7 @@ The web container proxies `/api/*` to the FastAPI service. The top bar should mo
 Use this when you want a lighter local demo without PostgreSQL:
 
 ```powershell
-cd C:/docker/thing-planner-workos-v0.9.3-functional
+cd C:/docker/thing-planner-workos-v0.9.4-functional
 docker compose -f docker-compose.sqlite.yml up --build -d
 ```
 
@@ -65,7 +69,7 @@ The app attempts demo auth automatically when the API is reachable. The demo acc
 - Email: `echofoxx@gmail.com`
 - Password: local demo password managed by the seeded API
 
-The UI uses a bearer token stored under the v0.9.3 token key and migrates older v0.9.1/v0.9.2 local storage where available.
+The UI uses a bearer token stored under the v0.9.4 token key and migrates older v0.9.1/v0.9.2/v0.9.3 local storage where available.
 
 ## Functional validation completed
 

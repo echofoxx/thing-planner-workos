@@ -1,0 +1,25 @@
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# Data/runtime
+*.db
+*.sqlite
+*.sqlite3
+/data/
+
+# Node future-proofing
+node_modules/
+dist/
+build/
+
+# Docker local overrides
+docker-compose.override.yml

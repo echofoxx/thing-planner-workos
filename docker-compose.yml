@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: thing-planner-db
+    environment:
+      POSTGRES_DB: thingplanner
+      POSTGRES_USER: thingplanner
+      POSTGRES_PASSWORD: thingplanner
+    volumes:
+      - thing_planner_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U thingplanner -d thingplanner"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    container_name: thing-planner-api
+    environment:
+      DATABASE_URL: postgresql+psycopg2://thingplanner:thingplanner@db:5432/thingplanner
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8099:8000"
+    restart: unless-stopped
+
+  web:
+    build: .
+    container_name: thing-planner-workos
+    depends_on:
+      - api
+    ports:
+      - "8098:80"
+    restart: unless-stopped
+
+volumes:
+  thing_planner_pgdata:

@@ -1,0 +1,487 @@
+{
+  "module": "home",
+  "view": "list",
+  "selectedProject": "p1",
+  "helper": true,
+  "aiPromo": true,
+  "version": "0.9.0",
+  "workspace": {
+    "name": "Adrian Francis's Workspace",
+    "initials": "A"
+  },
+  "members": [
+    {
+      "id": "adrian",
+      "name": "Adrian Francis",
+      "initials": "AF",
+      "avatar": "purple",
+      "role": "Workspace Owner"
+    },
+    {
+      "id": "mira",
+      "name": "Mira Chen",
+      "initials": "MC",
+      "avatar": "blue",
+      "role": "Project Lead"
+    },
+    {
+      "id": "tom",
+      "name": "Tom Reyes",
+      "initials": "TR",
+      "avatar": "orange",
+      "role": "Engineer"
+    },
+    {
+      "id": "nina",
+      "name": "Nina Patel",
+      "initials": "NP",
+      "avatar": "green",
+      "role": "Designer"
+    }
+  ],
+  "spaces": [
+    {
+      "id": "s1",
+      "name": "Team Space",
+      "icon": "\ud83d\udc65",
+      "folders": [
+        {
+          "id": "f1",
+          "name": "Projects",
+          "icon": "\ud83d\udcc1",
+          "lists": [
+            {
+              "id": "p1",
+              "name": "Project 1",
+              "icon": "\u2611",
+              "kind": "project"
+            },
+            {
+              "id": "p2",
+              "name": "Project 2",
+              "icon": "\u2611",
+              "kind": "project"
+            },
+            {
+              "id": "doc1",
+              "name": "Project Notes",
+              "icon": "\ud83d\udcc4",
+              "kind": "doc"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "projectId": "p1",
+      "name": "Task 1",
+      "assignee": "mira",
+      "due": "2026-07-07",
+      "priority": "High",
+      "status": "TO DO",
+      "comments": [
+        {
+          "by": "Adrian Francis",
+          "text": "Need kickoff checklist before assigning to the team."
+        }
+      ],
+      "estimate": 3,
+      "tracked": 0.5,
+      "billable": true,
+      "tags": [
+        "Kickoff"
+      ],
+      "progress": 0,
+      "description": "Initial planning task for the launch project.",
+      "start": "2026-07-04",
+      "duration": 3,
+      "critical": false
+    },
+    {
+      "id": "t2",
+      "projectId": "p1",
+      "name": "Task 2",
+      "assignee": "tom",
+      "due": "2026-07-08",
+      "priority": "Normal",
+      "status": "TO DO",
+      "comments": [],
+      "estimate": 5,
+      "tracked": 1.5,
+      "billable": true,
+      "tags": [
+        "Engineering"
+      ],
+      "progress": 0,
+      "description": "Build the core task workflow and validate drag/drop.",
+      "start": "2026-07-05",
+      "duration": 4,
+      "critical": true
+    },
+    {
+      "id": "t3",
+      "projectId": "p1",
+      "name": "Task 3",
+      "assignee": "nina",
+      "due": "2026-07-10",
+      "priority": "Low",
+      "status": "TO DO",
+      "comments": [],
+      "estimate": 2,
+      "tracked": 0,
+      "billable": false,
+      "tags": [
+        "Design"
+      ],
+      "progress": 0,
+      "description": "Polish empty states and template cards.",
+      "start": "2026-07-06",
+      "duration": 2,
+      "critical": false
+    },
+    {
+      "id": "t4",
+      "projectId": "p1",
+      "name": "Campaign dashboard wireframe",
+      "assignee": "adrian",
+      "due": "2026-07-05",
+      "priority": "Urgent",
+      "status": "IN PROGRESS",
+      "comments": [
+        {
+          "by": "Mira Chen",
+          "text": "Use KPI cards that drill into source work."
+        }
+      ],
+      "estimate": 4,
+      "tracked": 2.25,
+      "billable": true,
+      "tags": [
+        "Dashboard"
+      ],
+      "progress": 45,
+      "description": "Create actionable reporting cards for team productivity, campaigns, and billable hours.",
+      "start": "2026-07-04",
+      "duration": 4,
+      "critical": true
+    },
+    {
+      "id": "t5",
+      "projectId": "p1",
+      "name": "Project intake form automation",
+      "assignee": "mira",
+      "due": "2026-07-06",
+      "priority": "High",
+      "status": "BLOCKED",
+      "comments": [
+        {
+          "by": "Tom Reyes",
+          "text": "Blocked until custom field mapping is ready."
+        }
+      ],
+      "estimate": 6,
+      "tracked": 2,
+      "billable": true,
+      "tags": [
+        "Forms"
+      ],
+      "progress": 25,
+      "description": "Route form submissions into the right project with owner, priority, and AI summary.",
+      "start": "2026-07-05",
+      "duration": 5,
+      "critical": true
+    },
+    {
+      "id": "t6",
+      "projectId": "p1",
+      "name": "AI planner daily schedule",
+      "assignee": "adrian",
+      "due": "2026-07-09",
+      "priority": "Normal",
+      "status": "DONE",
+      "comments": [],
+      "estimate": 3,
+      "tracked": 3,
+      "billable": false,
+      "tags": [
+        "AI"
+      ],
+      "progress": 100,
+      "description": "Generate a priority-based schedule using tasks, calendar events, and goals.",
+      "start": "2026-07-03",
+      "duration": 3,
+      "critical": false
+    },
+    {
+      "id": "t7",
+      "projectId": "p2",
+      "name": "Client CRM pipeline template",
+      "assignee": "nina",
+      "due": "2026-07-13",
+      "priority": "High",
+      "status": "IN PROGRESS",
+      "comments": [],
+      "estimate": 7,
+      "tracked": 1,
+      "billable": true,
+      "tags": [
+        "CRM"
+      ],
+      "progress": 20,
+      "description": "Create agency/client pipeline template.",
+      "start": "2026-07-08",
+      "duration": 5,
+      "critical": false
+    },
+    {
+      "id": "t8",
+      "projectId": "p2",
+      "name": "GitHub automation proof of concept",
+      "assignee": "tom",
+      "due": "2026-07-11",
+      "priority": "Normal",
+      "status": "TO DO",
+      "comments": [],
+      "estimate": 6,
+      "tracked": 0,
+      "billable": false,
+      "tags": [
+        "Engineering"
+      ],
+      "progress": 0,
+      "description": "Attach commits and PRs to tasks.",
+      "start": "2026-07-08",
+      "duration": 3,
+      "critical": false
+    }
+  ],
+  "notifications": [
+    {
+      "id": "n1",
+      "type": "mention",
+      "title": "Mira mentioned you in Campaign dashboard wireframe",
+      "source": "Task",
+      "read": false,
+      "tab": "Primary"
+    },
+    {
+      "id": "n2",
+      "type": "risk",
+      "title": "Project intake form automation is blocked",
+      "source": "Risk",
+      "read": false,
+      "tab": "Primary"
+    },
+    {
+      "id": "n3",
+      "type": "ai",
+      "title": "AI found 2 schedule risks in Project 1",
+      "source": "AI",
+      "read": false,
+      "tab": "Other"
+    }
+  ],
+  "dashboards": [
+    {
+      "id": "d1",
+      "name": "Executive PMO Dashboard",
+      "private": false,
+      "favorite": true
+    }
+  ],
+  "forms": [
+    {
+      "id": "form1",
+      "name": "Project Intake",
+      "description": "Streamline new project requests",
+      "submissions": 3,
+      "favorite": false
+    },
+    {
+      "id": "form2",
+      "name": "IT Requests",
+      "description": "Triage and prioritize service requests",
+      "submissions": 7,
+      "favorite": true
+    }
+  ],
+  "docs": [
+    {
+      "id": "doc1",
+      "title": "Project Charter",
+      "kind": "Project Plan",
+      "owner": "Adrian Francis",
+      "updated": "Today",
+      "linkedTasks": 4
+    },
+    {
+      "id": "doc2",
+      "title": "Team SOP Wiki",
+      "kind": "Wiki",
+      "owner": "Mira Chen",
+      "updated": "Yesterday",
+      "linkedTasks": 2
+    },
+    {
+      "id": "doc3",
+      "title": "Decision Log",
+      "kind": "Decisions",
+      "owner": "Adrian Francis",
+      "updated": "2 days ago",
+      "linkedTasks": 6
+    }
+  ],
+  "goals": [
+    {
+      "id": "g1",
+      "name": "Launch production-ready PM demo",
+      "owner": "Adrian Francis",
+      "progress": 42,
+      "status": "At Risk"
+    },
+    {
+      "id": "g2",
+      "name": "Reduce project handoff cycle time",
+      "owner": "Mira Chen",
+      "progress": 68,
+      "status": "On Track"
+    },
+    {
+      "id": "g3",
+      "name": "Reach 90% billable time accuracy",
+      "owner": "Tom Reyes",
+      "progress": 74,
+      "status": "On Track"
+    }
+  ],
+  "automations": [
+    {
+      "id": "a1",
+      "name": "Escalate blocked tasks",
+      "category": "Automate Projects",
+      "enabled": true,
+      "trigger": "Status changes to BLOCKED",
+      "action": "Notify owner and create risk card"
+    },
+    {
+      "id": "a2",
+      "name": "Schedule dependent work",
+      "category": "Automate Scheduling",
+      "enabled": true,
+      "trigger": "Due date changes",
+      "action": "Shift dependent tasks and flag conflicts"
+    },
+    {
+      "id": "a3",
+      "name": "PR updates task status",
+      "category": "Automate Engineering",
+      "enabled": false,
+      "trigger": "GitHub PR opened",
+      "action": "Move task to In Review"
+    },
+    {
+      "id": "a4",
+      "name": "Lead form to CRM task",
+      "category": "Automate Agencies",
+      "enabled": true,
+      "trigger": "New lead form submitted",
+      "action": "Create deal and follow-up task"
+    }
+  ],
+  "aiMessages": [],
+  "reportCards": [
+    {
+      "id": "rc1",
+      "title": "Open Tasks",
+      "type": "kpi",
+      "metric": "open_tasks"
+    },
+    {
+      "id": "rc2",
+      "title": "Blocked Work",
+      "type": "kpi",
+      "metric": "blocked_tasks"
+    },
+    {
+      "id": "rc3",
+      "title": "Billable Hours",
+      "type": "kpi",
+      "metric": "billable_hours"
+    },
+    {
+      "id": "rc4",
+      "title": "Project Health",
+      "type": "ai",
+      "metric": "health"
+    },
+    {
+      "id": "rc5",
+      "title": "Work by Status",
+      "type": "chart",
+      "metric": "by_status"
+    },
+    {
+      "id": "rc6",
+      "title": "Team Productivity",
+      "type": "chart",
+      "metric": "by_assignee"
+    },
+    {
+      "id": "rc7",
+      "title": "Actionable Work Table",
+      "type": "table",
+      "metric": "work_table"
+    }
+  ],
+  "reportFilter": "all",
+  "formSubmissions": [],
+  "automationRuns": [],
+  "release": "v0.9.0",
+  "taskDependencies": [
+    {
+      "id": "dep_t1_t4",
+      "predecessorId": "t1",
+      "successorId": "t4",
+      "type": "FS",
+      "lagDays": 0,
+      "critical": false
+    },
+    {
+      "id": "dep_t2_t5",
+      "predecessorId": "t2",
+      "successorId": "t5",
+      "type": "FS",
+      "lagDays": 1,
+      "critical": true
+    },
+    {
+      "id": "dep_t4_t5",
+      "predecessorId": "t4",
+      "successorId": "t5",
+      "type": "FS",
+      "lagDays": 0,
+      "critical": true
+    },
+    {
+      "id": "dep_t5_t3",
+      "predecessorId": "t5",
+      "successorId": "t3",
+      "type": "FS",
+      "lagDays": 0,
+      "critical": true
+    },
+    {
+      "id": "dep_t7_t8",
+      "predecessorId": "t7",
+      "successorId": "t8",
+      "type": "FS",
+      "lagDays": 0,
+      "critical": false
+    }
+  ],
+  "ganttBaselines": [],
+  "ganttRiskAlerts": []
+}

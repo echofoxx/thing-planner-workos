@@ -1,0 +1,24 @@
+services:
+  api:
+    build: ./backend
+    container_name: thing-planner-api
+    environment:
+      DATABASE_URL: sqlite:////data/workos.db
+      SECRET_KEY: thing-planner-workos-v093-local-secret
+    volumes:
+      - thing_planner_sqlite:/data
+    ports:
+      - "8099:8000"
+    restart: unless-stopped
+
+  web:
+    build: .
+    container_name: thing-planner-workos
+    depends_on:
+      - api
+    ports:
+      - "8098:80"
+    restart: unless-stopped
+
+volumes:
+  thing_planner_sqlite:

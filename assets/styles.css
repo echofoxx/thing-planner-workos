@@ -541,3 +541,55 @@ button { cursor: pointer; }
 .badge.red { background:#ffe7e7; color:#c92228; }
 .muted { color: var(--muted); font-size: 12px; }
 @media (max-width: 1180px) { .v05-form-builder { grid-template-columns: 1fr; } }
+
+/* v0.6 Planner + AI Scheduling Engine */
+.planner-controlbar{
+  display:flex; align-items:center; gap:10px; margin: 0 0 14px; padding:10px 12px;
+  border:1px solid var(--border); border-radius: var(--radius); background:#fff; box-shadow:var(--soft-shadow);
+}
+.planner-controlbar input, .planner-mini-date input{
+  border:1px solid var(--border); border-radius:10px; padding:7px 10px; font:inherit; color:var(--text); background:#fff;
+}
+.planner-mini-date{ display:flex; gap:8px; align-items:center; padding: 4px 0 12px; }
+.sidebar-wide-btn{
+  width:100%; border:1px solid var(--border); background:#fff; color:var(--text); border-radius:12px; padding:10px 12px; margin:5px 0; text-align:left; font-weight:750; cursor:pointer;
+}
+.sidebar-wide-btn:hover{ border-color:var(--primary); color:var(--primary); box-shadow:var(--soft-shadow); }
+.planner-kpis .kpi-card{ min-height: 138px; }
+.planner-layout-v06{ display:grid; grid-template-columns: 360px minmax(420px,1fr) 320px; gap:16px; align-items:start; }
+.planner-task-card{
+  border:1px solid var(--border); border-radius:14px; padding:11px 12px; margin:9px 0; background:#fff; display:flex; justify-content:space-between; gap:10px; align-items:center; cursor:pointer;
+}
+.planner-task-card:hover{ border-color:var(--primary); box-shadow:var(--soft-shadow); }
+.planner-task-card.blocked{ border-color:#ffd1d1; background:#fff8f8; }
+.planner-score{ color:var(--muted); font-size:11px; margin-top:5px; font-weight:650; }
+.planner-day-card{ min-height: 560px; }
+.planner-timeline-v06{ position:relative; display:flex; flex-direction:column; gap:9px; }
+.planner-time-row{
+  display:grid; grid-template-columns: 86px minmax(0,1fr) auto; gap:12px; align-items:center;
+  border:1px solid var(--border); border-radius:14px; padding:11px 12px; background:#fff; position:relative; overflow:hidden;
+}
+.planner-time-row::before{ content:''; position:absolute; left:0; top:0; bottom:0; width:5px; background:#a855f7; }
+.planner-time-row.event::before{ background:#3b82f6; }
+.planner-time-row.event.focus::before, .planner-time-row.block.focus::before{ background:#10b981; }
+.planner-time-row.event.meeting::before{ background:#3b82f6; }
+.planner-time-row.block.ai_task::before{ background:#8b5cf6; }
+.planner-time-row.block.task::before{ background:#f59e0b; }
+.planner-time{ display:flex; flex-direction:column; gap:2px; font-size:12px; }
+.planner-time span{ color:var(--muted); }
+.planner-time-body b{ display:block; margin-bottom:3px; }
+.planner-time-body p{ margin:0; color:var(--muted); font-size:12px; line-height:1.4; }
+.planner-time-actions{ display:flex; gap:6px; align-items:center; }
+.planner-risk{ border:1px solid var(--border); border-radius:14px; padding:12px; margin:9px 0; background:#fff; }
+.planner-risk p{ margin:5px 0 0; color:var(--muted); font-size:12px; line-height:1.45; }
+.planner-risk.high{ background:#fff5f5; border-color:#ffd1d1; }
+.planner-risk.medium{ background:#fff8e7; border-color:#f4d48b; }
+.planner-risk.low{ background:#effdf5; border-color:#b7f7d0; }
+.planner-pref-row{ display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid var(--border); padding:9px 0; font-size:13px; }
+.planner-pref-row span{ color:var(--muted); }
+.planner-week-strip{ display:grid; grid-template-columns: repeat(7,minmax(120px,1fr)); gap:10px; }
+.week-day{ border:1px solid var(--border); border-radius:14px; padding:12px; background:#fff; display:flex; flex-direction:column; align-items:flex-start; gap:4px; cursor:pointer; }
+.week-day:hover{ border-color:var(--primary); box-shadow:var(--soft-shadow); }
+.week-day.active{ background:var(--primary-3); color:var(--primary); border-color:#d6c8ff; }
+.week-day span, .week-day em{ color:var(--muted); font-size:12px; font-style:normal; }
+@media (max-width: 1250px){ .planner-layout-v06{ grid-template-columns: 1fr; } .planner-week-strip{ grid-template-columns: repeat(2,minmax(0,1fr)); } .planner-controlbar{ flex-wrap:wrap; } }

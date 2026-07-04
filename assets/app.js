@@ -1,7 +1,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const STORAGE_KEY = 'thing-planner-workos-v050-state';
+const STORAGE_KEY = 'thing-planner-workos-v060-state';
 const API_BASE = window.THING_PLANNER_API_BASE || '/api';
 let apiOnline = false;
 let apiStatusText = 'Local demo mode';
@@ -9,7 +9,7 @@ let hasBootstrappedApi = false;
 let suppressApiSync = false;
 let syncTimer = null;
 let lastSyncAt = null;
-let authToken = localStorage.getItem('thing-planner-workos-v050-token') || null;
+let authToken = localStorage.getItem('thing-planner-workos-v060-token') || null;
 let currentUser = null;
 let authStatusText = 'Demo auth pending';
 let lastReportDataset = null;
@@ -21,7 +21,7 @@ const seedState = {
   selectedProject: 'p1',
   helper: true,
   aiPromo: true,
-  version: '0.5.0',
+  version: '0.6.0',
   workspace: {
     name: "Adrian Francis's Workspace",
     initials: 'A',
@@ -114,6 +114,7 @@ const seedState = {
 };
 
 let state = loadState();
+ensurePlannerState();
 let activeHomeTab = 'Primary';
 let formBuilderOpen = false;
 let selectedTaskId = null;
@@ -175,7 +176,7 @@ async function ensureDemoAuth() {
       const data = await response.json();
       authToken = data.token;
       currentUser = data.user;
-      localStorage.setItem('thing-planner-workos-v050-token', authToken);
+      localStorage.setItem('thing-planner-workos-v060-token', authToken);
       authStatusText = `Demo auth: ${currentUser.display_name || currentUser.email}`;
     }
   } catch (error) {
@@ -193,7 +194,7 @@ async function hydrateFromApi() {
     if (!response.ok) throw new Error('State fetch failed');
     const data = await response.json();
     apiOnline = true;
-    apiStatusText = `${healthJson.version || 'v0.5.0'} ${healthJson.schema || 'API'} connected`;
+    apiStatusText = `${healthJson.version || 'v0.6.0'} ${healthJson.schema || 'API'} connected`;
     await ensureDemoAuth();
     hasBootstrappedApi = true;
     if (data && data.state) {
@@ -309,7 +310,7 @@ function renderTopbar() {
       </button>
       <button class="top-icon" onclick="setModule('planner')">▣</button>
       <button class="top-icon" onclick="toast('No workspace warnings today')">⚠</button>
-      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.5 reporting/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
+      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.6 planner/scheduling/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
     </div>
     <div class="global-search-wrap">
       <label class="global-search"><span>⌕</span><input id="globalSearch" placeholder="Search ⌘K" onkeydown="if(event.key==='Enter') globalSearch(this.value)" /></label>
@@ -1379,7 +1380,7 @@ async function runManualAutomation() {
 
 function renderMoreMain() {
   const runs = (state.automationRuns || []).slice(0, 6);
-  return `<div class="content wide"><div class="section-title"><div><h2>Automations and Connected Tools</h2><p style="margin:4px 0 0;color:var(--muted)">v0.5 adds an intake automation engine with run history, form triggers, and connected task creation.</p></div><button class="btn-primary" onclick="runManualAutomation()">▶ Run Test Automation</button></div>
+  return `<div class="content wide"><div class="section-title"><div><h2>Automations and Connected Tools</h2><p style="margin:4px 0 0;color:var(--muted)">v0.6 adds an AI planner and scheduling engine plus the v0.5 intake automation engine with run history, form triggers, and connected task creation.</p></div><button class="btn-primary" onclick="runManualAutomation()">▶ Run Test Automation</button></div>
     ${renderDataLayerCards()}
     <div class="section-title"><h2>Automation templates</h2><button class="btn-secondary" onclick="setModule('forms')">Open Forms</button></div>
     <div class="auto-grid">${state.automations.map(a => `<div class="auto-card"><span class="badge ${a.enabled?'green':''}">${a.enabled?'Enabled':'Paused'}</span><h3>${escapeHtml(a.name)}</h3><p>${escapeHtml(a.category)}<br/><b>When:</b> ${escapeHtml(a.trigger)}<br/><b>Then:</b> ${escapeHtml(a.action)}</p><button class="btn-secondary" onclick="toggleAutomation('${a.id}')">${a.enabled?'Pause':'Enable'}</button></div>`).join('')}
@@ -1406,10 +1407,141 @@ function renderDataLayerCards() {
   const submissions = (state.formSubmissions || []).length;
   const runs = (state.automationRuns || []).length;
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.5 Forms + Automation</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.6 Planner + Automation</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • intake actions enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Forms</span><h3>Submissions</h3><div class="value">${submissions}</div><div class="trend">AI analysis and task routing available</div><button class="btn-secondary" onclick="setModule('forms')">Open forms</button></div>
     <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">/api/automations and /api/automations/run</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
+  </div>`;
+}
+
+
+
+// v0.6 Planner + AI Scheduling Engine overrides
+function plannerToday() { return new Date().toISOString().slice(0, 10); }
+function ensurePlannerState() {
+  state.version = '0.6.0';
+  state.selectedPlannerDate = state.selectedPlannerDate || plannerToday();
+  state.plannerPreferences = state.plannerPreferences || { workday_start:'08:30', workday_end:'17:00', lunch_start:'12:00', lunch_end:'13:00', focus_block_minutes:90, auto_schedule_blocked:false };
+  state.calendarEvents = state.calendarEvents || defaultCalendarEvents(state.selectedPlannerDate);
+  state.plannerBlocks = state.plannerBlocks || [];
+  state.plannerRisks = state.plannerRisks || [];
+  state.plannerMetrics = state.plannerMetrics || { scheduledBlocks: 0, aiScheduled: 0, meetings: state.calendarEvents.length, candidateTasks: state.tasks.filter(t=>t.status!=='DONE').length, freeSlotsRemaining: 0 };
+}
+function defaultCalendarEvents(day) {
+  return [
+    { id:'ce_standup', title:'Daily standup', kind:'meeting', startAt:`${day}T09:00:00`, endAt:`${day}T09:30:00`, source:'seed', color:'blue', ownerId:'adrian' },
+    { id:'ce_focus', title:'Protected deep work', kind:'focus', startAt:`${day}T10:00:00`, endAt:`${day}T11:30:00`, source:'seed', color:'purple', ownerId:'adrian' },
+    { id:'ce_stakeholder', title:'Stakeholder sync', kind:'meeting', startAt:`${day}T13:30:00`, endAt:`${day}T14:15:00`, source:'seed', color:'blue', ownerId:'adrian' },
+    { id:'ce_triage', title:'Project risk triage', kind:'meeting', startAt:`${day}T15:30:00`, endAt:`${day}T16:00:00`, source:'seed', color:'orange', ownerId:'adrian' },
+  ];
+}
+function renderPlannerSidebar() {
+  ensurePlannerState();
+  const day = state.selectedPlannerDate;
+  return baseSidebar('Planner', "addFocusBlock()", `
+    <div class="side-nav">
+      <div class="side-item active" onclick="setPlannerDate('${plannerToday()}')"><span>▣</span><span>Today</span></div>
+      <div class="side-item" onclick="shiftPlannerDate(1)"><span>☰</span><span>Tomorrow</span></div>
+      <div class="side-item" onclick="addFocusBlock()"><span>◷</span><span>Focus Blocks</span></div>
+      <div class="side-item" onclick="planMyDay()"><span>✽</span><span>AI Schedule</span></div>
+    </div>
+    <div class="hr"></div>
+    <div class="side-section">Selected day</div>
+    <div class="planner-mini-date"><input type="date" value="${day}" onchange="setPlannerDate(this.value)"/><button class="btn-secondary btn-small" onclick="refreshPlannerFromApi()">Sync</button></div>
+    <div class="side-section">Calendars</div>
+    <div class="side-item"><span>🟣</span><span>Work Tasks</span><small>${(state.plannerBlocks||[]).filter(b=>samePlannerDay(b.startAt)).length}</small></div>
+    <div class="side-item"><span>🔵</span><span>Meetings</span><small>${(state.calendarEvents||[]).filter(e=>samePlannerDay(e.startAt) && e.kind==='meeting').length}</small></div>
+    <div class="side-item"><span>🟢</span><span>Goals</span><small>${state.goals.length}</small></div>
+    <div class="hr"></div>
+    <div class="side-section">Planner controls</div>
+    <button class="sidebar-wide-btn" onclick="planMyDay()">✽ Plan my day</button>
+    <button class="sidebar-wide-btn" onclick="addCalendarMeetingDemo()">＋ Add meeting</button>
+    <button class="sidebar-wide-btn" onclick="clearAISchedule()">Clear AI blocks</button>
+  `);
+}
+function samePlannerDay(iso) { return String(iso||'').slice(0,10) === state.selectedPlannerDate; }
+function plannerTime(iso) { try { return new Date(String(iso).replace(/:00$/, '')).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}); } catch { return String(iso).slice(11,16); } }
+function plannerDuration(startAt, endAt) { try { return Math.max(0, Math.round((new Date(endAt) - new Date(startAt))/60000)); } catch { return 0; } }
+function plannerDateLabel(day) { try { return new Date(day + 'T00:00:00').toLocaleDateString(undefined,{weekday:'long', month:'short', day:'numeric'}); } catch { return day; } }
+function priorityScoreLocal(t) { const base = {Urgent:100, High:75, Normal:45, Low:20}[t.priority] || 35; const critical=t.critical?18:0; const blocked=t.status==='BLOCKED'?-50:0; let due=0; try { const diff=(new Date(t.due+'T00:00:00')-new Date(state.selectedPlannerDate+'T00:00:00'))/86400000; due=diff<0?35:diff<=1?25:diff<=3?12:0; } catch{} return Math.max(0, base+critical+blocked+due+(t.progress>50?5:0)); }
+function plannerCandidateTasks() { return state.tasks.filter(t=>t.status!=='DONE' && (state.plannerPreferences.auto_schedule_blocked || t.status!=='BLOCKED')).sort((a,b)=>priorityScoreLocal(b)-priorityScoreLocal(a)); }
+function renderPlannerMain() {
+  ensurePlannerState();
+  const day = state.selectedPlannerDate;
+  const events = (state.calendarEvents||[]).filter(e=>samePlannerDay(e.startAt));
+  const blocks = (state.plannerBlocks||[]).filter(b=>samePlannerDay(b.startAt));
+  const candidates = plannerCandidateTasks();
+  const timeline = [...events.map(e=>({...e, itemType:'event'})), ...blocks.map(b=>({...b, itemType:'block'}))].sort((a,b)=>String(a.startAt).localeCompare(String(b.startAt)));
+  const focusMinutes = timeline.filter(x=>x.kind==='focus' || x.blockType==='focus' || x.blockType==='ai_task' || x.blockType==='task').reduce((sum,x)=>sum+plannerDuration(x.startAt,x.endAt),0);
+  const risks = state.plannerRisks?.length ? state.plannerRisks : computePlannerRisksLocal(candidates, blocks);
+  return `<div class="content wide">
+    <div class="section-title"><div><h2>AI Planner + Scheduling Engine</h2><p style="margin:4px 0 0;color:var(--muted)">Tasks and meetings converge into a priority-based daily schedule with focus blocks, delay flags, and one-click schedule actions.</p></div><div><button class="btn-secondary" onclick="refreshPlannerFromApi()">⟳ Refresh</button><button class="btn-primary" onclick="planMyDay()">✽ Plan my day</button></div></div>
+    <div class="planner-controlbar">
+      <button class="pill-control" onclick="shiftPlannerDate(-1)">← Previous</button>
+      <input type="date" value="${day}" onchange="setPlannerDate(this.value)" />
+      <button class="pill-control" onclick="shiftPlannerDate(1)">Next →</button>
+      <span class="report-status">${plannerDateLabel(day)} • ${apiOnline ? 'Server planner API available' : 'Local planner fallback'}</span>
+    </div>
+    <div class="cards-grid planner-kpis">
+      <div class="kpi-card"><span class="badge purple">AI</span><h3>Scheduled blocks</h3><div class="value">${blocks.length}</div><div class="trend">${blocks.filter(b=>b.blockType==='ai_task').length} generated by AI today</div></div>
+      <div class="kpi-card"><span class="badge green">Calendar</span><h3>Meetings</h3><div class="value">${events.filter(e=>e.kind==='meeting').length}</div><div class="trend">${events.length} total calendar items</div></div>
+      <div class="kpi-card"><span class="badge">Focus</span><h3>Planned focus</h3><div class="value">${Math.round(focusMinutes/60*10)/10}h</div><div class="trend">Tasks, protected focus, and AI schedule blocks</div></div>
+      <div class="kpi-card"><span class="badge ${risks.some(r=>r.level==='high')?'red':'warn'}">Risk</span><h3>Planner warnings</h3><div class="value">${risks.length}</div><div class="trend">AI delay and overload checks</div></div>
+    </div>
+    <div class="planner-layout-v06">
+      <div class="report-card"><div class="report-card-head"><h3>Priority queue</h3><button class="btn-secondary btn-small" onclick="planMyDay()">Auto-place</button></div>
+        <div class="priority-list">${candidates.slice(0,9).map(t=>`<div class="planner-task-card ${t.status==='BLOCKED'?'blocked':''}" onclick="openTask('${t.id}')"><div><b>${escapeHtml(t.name)}</b><div class="task-meta"><span>${escapeHtml(t.priority)}</span><span>${dateShort(t.due)}</span><span>${escapeHtml(memberById(t.assignee).name)}</span><span>${t.estimate || 1}h</span></div><div class="planner-score">Score ${Math.round(priorityScoreLocal(t))} • ${t.critical?'critical path':'standard'}</div></div><button class="btn-secondary btn-small" onclick="event.stopPropagation(); quickScheduleTask('${t.id}')">Schedule</button></div>`).join('')}</div>
+      </div>
+      <div class="report-card planner-day-card"><div class="report-card-head"><h3>Today timeline</h3><button class="btn-secondary btn-small" onclick="addFocusBlock()">＋ Focus</button></div>
+        <div class="planner-timeline-v06">${timeline.length ? timeline.map(item=>renderPlannerTimelineItem(item)).join('') : `<div class="empty-mini">No blocks yet. Click <b>Plan my day</b> to generate a schedule.</div>`}</div>
+      </div>
+      <div class="report-card"><div class="report-card-head"><h3>AI delay watch</h3><button class="btn-secondary btn-small" onclick="runAISuggest('Planner risk review')">Ask AI</button></div>
+        ${risks.map(r=>`<div class="planner-risk ${r.level}"><b>${escapeHtml(r.title)}</b><p>${escapeHtml(r.recommendation)}</p></div>`).join('') || `<div class="planner-risk low"><b>No major schedule warnings</b><p>Your planned work fits the current day.</p></div>`}
+        <div class="hr"></div><h3>Scheduling rules</h3>
+        <div class="planner-pref-row"><span>Workday</span><b>${state.plannerPreferences.workday_start || '08:30'}–${state.plannerPreferences.workday_end || '17:00'}</b></div>
+        <div class="planner-pref-row"><span>Focus block size</span><b>${state.plannerPreferences.focus_block_minutes || 90} min</b></div>
+        <div class="planner-pref-row"><span>Blocked tasks</span><b>${state.plannerPreferences.auto_schedule_blocked ? 'Include' : 'Exclude'}</b></div>
+      </div>
+    </div>
+    <div class="section-title"><h2>Week strip</h2><button class="btn-secondary" onclick="toast('Week optimization placeholder')">Optimize week</button></div>
+    <div class="planner-week-strip">${[0,1,2,3,4,5,6].map(offset=>renderWeekDay(offset)).join('')}</div>
+  </div>`;
+}
+function renderPlannerTimelineItem(item) {
+  const isEvent = item.itemType === 'event';
+  const cls = isEvent ? `event ${item.kind||'meeting'}` : `block ${item.blockType||'task'}`;
+  const title = item.title || item.name;
+  const meta = isEvent ? `${item.kind || 'event'} • ${item.source || 'manual'}` : `${item.blockType || 'task'} • ${item.reason || 'scheduled work'}`;
+  const actions = isEvent ? `<button class="btn-secondary btn-small" onclick="toast('Calendar event opened')">Open</button>` : `<button class="btn-secondary btn-small" onclick="openTask('${item.taskId||''}')">Task</button><button class="btn-secondary btn-small" onclick="removePlannerBlock('${item.id}')">Remove</button>`;
+  return `<div class="planner-time-row ${cls}"><div class="planner-time"><b>${plannerTime(item.startAt)}</b><span>${plannerTime(item.endAt)}</span></div><div class="planner-time-body"><b>${escapeHtml(title)}</b><p>${escapeHtml(meta)}</p></div><div class="planner-time-actions">${actions}</div></div>`;
+}
+function renderWeekDay(offset){ const d=new Date(state.selectedPlannerDate+'T00:00:00'); d.setDate(d.getDate()+offset); const key=d.toISOString().slice(0,10); const count=(state.plannerBlocks||[]).filter(b=>String(b.startAt||'').slice(0,10)===key).length; return `<button class="week-day ${key===state.selectedPlannerDate?'active':''}" onclick="setPlannerDate('${key}')"><b>${d.toLocaleDateString(undefined,{weekday:'short'})}</b><span>${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span><em>${count} blocks</em></button>`; }
+function computePlannerRisksLocal(tasks, blocks){ const risks=[]; const overdue=tasks.filter(t=>t.due && t.due<state.selectedPlannerDate).length; const blocked=state.tasks.filter(t=>t.status==='BLOCKED').length; if(overdue) risks.push({level:'high',title:`${overdue} overdue tasks need recovery`,recommendation:'Schedule recovery time or renegotiate due dates.'}); if(blocked) risks.push({level:'medium',title:`${blocked} blocked tasks need clearing`,recommendation:'Resolve blockers before AI can safely schedule execution work.'}); if(blocks.length<3) risks.push({level:'medium',title:'Schedule is under-planned',recommendation:'Run Plan my day or drag priority work into focus blocks.'}); return risks; }
+async function refreshPlannerFromApi(){ ensurePlannerState(); if(!apiOnline){ toast('Planner running locally'); render(); return; } try{ const res=await fetch(`${API_BASE}/planner?date=${state.selectedPlannerDate}`, {headers: authHeaders(), cache:'no-store'}); if(!res.ok) throw new Error('Planner API failed'); const data=await res.json(); applyPlannerPayload(data); toast('Planner refreshed from API'); saveState(); render(); }catch(err){ console.warn(err); toast('Planner API unavailable; using local schedule'); }}
+function applyPlannerPayload(data){ if(data.state){ state={...state,...data.state}; ensurePlannerState(); return; } if(data.events) state.calendarEvents=[...(state.calendarEvents||[]).filter(e=>!samePlannerDay(e.startAt)),...data.events]; if(data.blocks) state.plannerBlocks=[...(state.plannerBlocks||[]).filter(b=>!samePlannerDay(b.startAt)),...data.blocks]; if(data.risks) state.plannerRisks=data.risks; if(data.metrics) state.plannerMetrics=data.metrics; if(data.preferences) state.plannerPreferences={...state.plannerPreferences,...data.preferences}; }
+async function planMyDay(){ ensurePlannerState(); if(apiOnline){ try{ const res=await fetch(`${API_BASE}/planner/plan-my-day`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body: JSON.stringify({date: state.selectedPlannerDate, owner_id:'adrian', mode:'balanced', regenerate:true})}); if(!res.ok) throw new Error('Planner API failed'); const data=await res.json(); applyPlannerPayload(data); toast(`AI scheduled ${data.metrics?.aiScheduled || 0} blocks`); saveState(); render(); return; }catch(err){ console.warn(err); toast('Planner API unavailable; generating locally'); }} generatePlannerBlocksLocal(); saveState(); render(); }
+function generatePlannerBlocksLocal(){ const day=state.selectedPlannerDate; const candidates=plannerCandidateTasks(); const slots=['08:30','09:30','11:30','13:00','14:20','16:00']; state.plannerBlocks=(state.plannerBlocks||[]).filter(b=>!(samePlannerDay(b.startAt)&&b.blockType==='ai_task')); candidates.slice(0,6).forEach((t,i)=>{ const start=slots[i]||'16:00'; const duration=Math.min(90, Math.max(30, Math.round((t.estimate||1)*60))); state.plannerBlocks.push({id:uid(), taskId:t.id, title:t.name, ownerId:t.assignee, startAt:`${day}T${start}:00`, endAt:addMinutesIso(`${day}T${start}:00`, duration), blockType:'ai_task', status:'planned', score:priorityScoreLocal(t), reason:`AI scheduled from priority ${t.priority}${t.critical?', critical path':''}`}); }); state.plannerRisks=computePlannerRisksLocal(candidates,state.plannerBlocks); state.plannerMetrics={scheduledBlocks:state.plannerBlocks.filter(b=>samePlannerDay(b.startAt)).length, aiScheduled:state.plannerBlocks.filter(b=>samePlannerDay(b.startAt)&&b.blockType==='ai_task').length, meetings:state.calendarEvents.filter(e=>samePlannerDay(e.startAt)).length, candidateTasks:candidates.length}; toast(`AI scheduled ${state.plannerMetrics.aiScheduled} local blocks`); }
+function addMinutesIso(iso, minutes){ const d=new Date(iso); d.setMinutes(d.getMinutes()+minutes); return d.toISOString().slice(0,19); }
+function setPlannerDate(day){ state.selectedPlannerDate=day || plannerToday(); ensurePlannerState(); render(); }
+function shiftPlannerDate(days){ const d=new Date(state.selectedPlannerDate+'T00:00:00'); d.setDate(d.getDate()+days); setPlannerDate(d.toISOString().slice(0,10)); }
+async function quickScheduleTask(taskId){ ensurePlannerState(); const open=['08:30','11:30','14:30','16:00']; const existing=(state.plannerBlocks||[]).filter(b=>samePlannerDay(b.startAt)).length; const time=open[Math.min(existing, open.length-1)]; const task=state.tasks.find(t=>t.id===taskId); if(!task) return; if(apiOnline){ try{ const res=await fetch(`${API_BASE}/planner/tasks/${taskId}/schedule`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body: JSON.stringify({date:state.selectedPlannerDate, start_time:time, duration_minutes:Math.min(90, Math.max(30, Math.round((task.estimate||1)*60))), owner_id:task.assignee, reason:'Quick scheduled from Planner priority queue'})}); if(res.ok){ const data=await res.json(); applyPlannerPayload(data); toast('Task scheduled'); saveState(); render(); return; }}catch(err){ console.warn(err); }} state.plannerBlocks.push({id:uid(), taskId:task.id, title:task.name, ownerId:task.assignee, startAt:`${state.selectedPlannerDate}T${time}:00`, endAt:addMinutesIso(`${state.selectedPlannerDate}T${time}:00`,60), blockType:'task', status:'planned', score:priorityScoreLocal(task), reason:'Quick scheduled locally'}); toast('Task scheduled locally'); saveState(); render(); }
+async function addFocusBlock(){ ensurePlannerState(); const start='10:00'; if(apiOnline){ try{ const res=await fetch(`${API_BASE}/planner/focus-blocks`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body: JSON.stringify({date:state.selectedPlannerDate, start_time:start, duration_minutes:90, title:'Protected focus block', owner_id:'adrian', reason:'Created from Planner UI'})}); if(res.ok){ const data=await res.json(); applyPlannerPayload(data); toast('Focus block created'); saveState(); render(); return; }}catch(err){ console.warn(err); }} state.plannerBlocks.push({id:uid(), taskId:null, title:'Protected focus block', ownerId:'adrian', startAt:`${state.selectedPlannerDate}T${start}:00`, endAt:addMinutesIso(`${state.selectedPlannerDate}T${start}:00`,90), blockType:'focus', status:'protected', score:0, reason:'Created locally'}); toast('Focus block created locally'); saveState(); render(); }
+async function removePlannerBlock(blockId){ if(!blockId) return; if(apiOnline){ try{ const res=await fetch(`${API_BASE}/planner/blocks/${blockId}`, {method:'DELETE', headers:authHeaders()}); if(res.ok){ const data=await res.json(); if(data.state) state={...state,...data.state}; toast('Planner block removed'); saveState(); render(); return; }}catch(err){ console.warn(err); }} state.plannerBlocks=(state.plannerBlocks||[]).filter(b=>b.id!==blockId); toast('Planner block removed locally'); saveState(); render(); }
+function clearAISchedule(){ state.plannerBlocks=(state.plannerBlocks||[]).filter(b=>!(samePlannerDay(b.startAt)&&b.blockType==='ai_task')); toast('AI schedule blocks cleared'); saveState(); render(); }
+async function addCalendarMeetingDemo(){ ensurePlannerState(); const event={title:'New planning sync', kind:'meeting', start_at:`${state.selectedPlannerDate}T14:00:00`, end_at:`${state.selectedPlannerDate}T14:30:00`, source:'manual', owner_id:'adrian', color:'blue', metadata:{created_from:'planner_ui'}}; if(apiOnline){ try{ const res=await fetch(`${API_BASE}/planner/events`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body: JSON.stringify(event)}); if(res.ok){ const data=await res.json(); applyPlannerPayload(data); toast('Meeting added'); saveState(); render(); return; }}catch(err){ console.warn(err); }} state.calendarEvents.push({id:uid(), title:event.title, kind:event.kind, startAt:event.start_at, endAt:event.end_at, source:'manual', ownerId:'adrian', color:'blue'}); toast('Meeting added locally'); saveState(); render(); }
+function renderDataLayerCards() {
+  const tasks = state.tasks.length;
+  const projects = state.spaces.flatMap(s => s.folders || []).flatMap(f => f.lists || []).filter(l => l.kind === 'project').length;
+  const comments = state.tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0);
+  const submissions = (state.formSubmissions || []).length;
+  const runs = (state.automationRuns || []).length;
+  const blocks = (state.plannerBlocks || []).length;
+  const events = (state.calendarEvents || []).length;
+  return `<div class="cards-grid">
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.6 Planner + Automation</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • scheduling enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
+    <div class="kpi-card"><span class="badge purple">Planner</span><h3>Schedule objects</h3><div class="value">${blocks + events}</div><div class="trend">${blocks} planner blocks • ${events} calendar events</div><button class="btn-secondary" onclick="setModule('planner')">Open planner</button></div>
+    <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/planner and /api/automations</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
   </div>`;
 }
 
@@ -1443,6 +1575,15 @@ window.addReportCard = addReportCard;
 window.dashboardAction = dashboardAction;
 window.drilldownReport = drilldownReport;
 window.toggleAutomation = toggleAutomation;
+window.planMyDay = planMyDay;
+window.refreshPlannerFromApi = refreshPlannerFromApi;
+window.setPlannerDate = setPlannerDate;
+window.shiftPlannerDate = shiftPlannerDate;
+window.quickScheduleTask = quickScheduleTask;
+window.addFocusBlock = addFocusBlock;
+window.removePlannerBlock = removePlannerBlock;
+window.clearAISchedule = clearAISchedule;
+window.addCalendarMeetingDemo = addCalendarMeetingDemo;
 window.aiTaskSummary = aiTaskSummary;
 window.aiCreateSubtasks = aiCreateSubtasks;
 window.globalSearch = globalSearch;

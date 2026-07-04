@@ -34,7 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 
-APP_VERSION = "v0.5.0"
+APP_VERSION = "v0.6.0"
 DEFAULT_WORKSPACE_ID = "w1"
 DEFAULT_OWNER_ID = "adrian"
 SEED_PATH = Path(__file__).with_name("seed_state.json")
@@ -298,6 +298,56 @@ automation_runs = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+
+calendar_events = Table(
+    "calendar_events",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("title", String(500), nullable=False),
+    Column("kind", String(64), nullable=False, default="meeting"),
+    Column("start_at", String(64), nullable=False),
+    Column("end_at", String(64), nullable=False),
+    Column("source", String(128), nullable=False, default="manual"),
+    Column("task_id", String(64), ForeignKey("tasks.id"), nullable=True),
+    Column("owner_id", String(64), ForeignKey("users.id"), nullable=True),
+    Column("color", String(32), nullable=False, default="blue"),
+    Column("metadata_json", JSON, nullable=False, default=dict),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+planner_blocks = Table(
+    "planner_blocks",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("task_id", String(64), ForeignKey("tasks.id"), nullable=True),
+    Column("title", String(500), nullable=False),
+    Column("owner_id", String(64), ForeignKey("users.id"), nullable=True),
+    Column("start_at", String(64), nullable=False),
+    Column("end_at", String(64), nullable=False),
+    Column("block_type", String(64), nullable=False, default="task"),
+    Column("status", String(64), nullable=False, default="planned"),
+    Column("score", Float, nullable=False, default=0),
+    Column("reason", Text, nullable=False, default=""),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+planner_preferences = Table(
+    "planner_preferences",
+    metadata,
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), primary_key=True),
+    Column("workday_start", String(16), nullable=False, default="08:30"),
+    Column("workday_end", String(16), nullable=False, default="17:00"),
+    Column("lunch_start", String(16), nullable=False, default="12:00"),
+    Column("lunch_end", String(16), nullable=False, default="13:00"),
+    Column("focus_block_minutes", Integer, nullable=False, default=90),
+    Column("auto_schedule_blocked", Boolean, nullable=False, default=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 activity_logs = Table(
     "activity_logs",
     metadata,
@@ -494,10 +544,46 @@ class AutomationRunPayload(BaseModel):
     details: Dict[str, Any] = Field(default_factory=dict)
 
 
+class PlannerSchedulePayload(BaseModel):
+    date: Optional[str] = None
+    owner_id: str = DEFAULT_OWNER_ID
+    mode: str = "balanced"
+    regenerate: bool = True
+
+
+class CalendarEventPayload(BaseModel):
+    title: str
+    kind: str = "meeting"
+    start_at: str
+    end_at: str
+    source: str = "manual"
+    task_id: Optional[str] = None
+    owner_id: str = DEFAULT_OWNER_ID
+    color: str = "blue"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskSchedulePayload(BaseModel):
+    date: str
+    start_time: str
+    duration_minutes: int = 60
+    owner_id: str = DEFAULT_OWNER_ID
+    reason: str = "Manual schedule from Planner"
+
+
+class FocusBlockPayload(BaseModel):
+    date: str
+    start_time: str = "10:00"
+    duration_minutes: int = 90
+    title: str = "Focus block"
+    owner_id: str = DEFAULT_OWNER_ID
+    reason: str = "Protected focus time"
+
+
 app = FastAPI(
     title="Thing Planner WorkOS API",
     version=APP_VERSION,
-    description="v0.5 forms, intake automation engine, form submissions, automation runs, normalized data, reporting, and demo auth for Thing Planner WorkOS.",
+    description="v0.6 planner, AI scheduling engine, calendar events, time blocks, normalized data, reporting, forms, automations, and demo auth for Thing Planner WorkOS.",
 )
 
 app.add_middleware(
@@ -514,6 +600,7 @@ def startup() -> None:
     metadata.create_all(engine)
     ensure_seed_data()
     ensure_default_report_cards()
+    ensure_default_planner_data()
 
 
 def get_current_user(authorization: Optional[str] = Header(default=None)) -> Optional[Dict[str, Any]]:
@@ -533,7 +620,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> Opt
 def load_seed_state() -> Dict[str, Any]:
     with SEED_PATH.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    data["version"] = "0.5.0"
+    data["version"] = "0.6.0"
     return data
 
 
@@ -684,7 +771,43 @@ def ensure_seed_data() -> None:
             if not exists:
                 conn.execute(automations.insert().values(workspace_id=DEFAULT_WORKSPACE_ID, enabled=True, **auto))
         seed_custom_fields(conn)
-        log_event(conn, "seed", "workspace", DEFAULT_WORKSPACE_ID, "Seeded normalized v0.5.0 intake automation workspace", DEFAULT_OWNER_ID, {"version": APP_VERSION})
+        log_event(conn, "seed", "workspace", DEFAULT_WORKSPACE_ID, "Seeded normalized v0.6.0 planner scheduling workspace", DEFAULT_OWNER_ID, {"version": APP_VERSION})
+
+
+def ensure_default_planner_data() -> None:
+    """Create planner preferences and demo meetings if they do not exist."""
+    metadata.create_all(engine)
+    today = utc_now().date().isoformat()
+    with engine.begin() as conn:
+        pref_exists = conn.execute(select(planner_preferences.c.workspace_id).where(planner_preferences.c.workspace_id == DEFAULT_WORKSPACE_ID)).first()
+        if not pref_exists:
+            conn.execute(planner_preferences.insert().values(
+                workspace_id=DEFAULT_WORKSPACE_ID, workday_start="08:30", workday_end="17:00",
+                lunch_start="12:00", lunch_end="13:00", focus_block_minutes=90,
+                auto_schedule_blocked=False, updated_at=utc_now(),
+            ))
+        auto_exists = conn.execute(select(automations.c.id).where(automations.c.id == "auto_ai_schedule")).first()
+        if not auto_exists:
+            conn.execute(automations.insert().values(
+                id="auto_ai_schedule", workspace_id=DEFAULT_WORKSPACE_ID, name="AI daily schedule",
+                category="Automate Scheduling", enabled=True, trigger="Plan my day",
+                action="Generate priority-based schedule blocks and planner risk warnings",
+            ))
+        existing_events = conn.execute(select(func.count()).select_from(calendar_events).where(calendar_events.c.workspace_id == DEFAULT_WORKSPACE_ID)).scalar_one()
+        if existing_events == 0:
+            defaults = [
+                ("ce_standup", "Daily standup", "meeting", "09:00", "09:30", "blue"),
+                ("ce_focus", "Protected deep work", "focus", "10:00", "11:30", "purple"),
+                ("ce_stakeholder", "Stakeholder sync", "meeting", "13:30", "14:15", "blue"),
+                ("ce_triage", "Project risk triage", "meeting", "15:30", "16:00", "orange"),
+            ]
+            for event_id, title, kind, start_time, end_time, color in defaults:
+                conn.execute(calendar_events.insert().values(
+                    id=event_id, workspace_id=DEFAULT_WORKSPACE_ID, title=title, kind=kind,
+                    start_at=f"{today}T{start_time}:00", end_at=f"{today}T{end_time}:00",
+                    source="seed", task_id=None, owner_id=DEFAULT_OWNER_ID, color=color,
+                    metadata_json={"demo": True}, created_at=utc_now(), updated_at=utc_now(),
+                ))
 
 
 def ensure_default_report_cards() -> None:
@@ -805,6 +928,9 @@ def serialize_state() -> Dict[str, Any]:
         automation_rows = conn.execute(select(automations).where(automations.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
         automation_run_rows = conn.execute(select(automation_runs).where(automation_runs.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(automation_runs.c.created_at.desc()).limit(20)).all()
         custom_field_rows = conn.execute(select(custom_fields).where(custom_fields.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+        calendar_event_rows = conn.execute(select(calendar_events).where(calendar_events.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(calendar_events.c.start_at)).all()
+        planner_block_rows = conn.execute(select(planner_blocks).where(planner_blocks.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(planner_blocks.c.start_at)).all()
+        pref_row = conn.execute(select(planner_preferences).where(planner_preferences.c.workspace_id == DEFAULT_WORKSPACE_ID)).first()
 
     comments_by_task: Dict[str, List[Dict[str, Any]]] = {}
     for c in comment_rows:
@@ -828,7 +954,7 @@ def serialize_state() -> Dict[str, Any]:
         "selectedProject": "p1",
         "helper": True,
         "aiPromo": True,
-        "version": "0.5.0",
+        "version": "0.6.0",
         "workspace": {"name": workspace["name"], "initials": workspace["initials"]},
         "members": [
             {"id": r.id, "name": r.display_name, "initials": r.initials, "avatar": r.avatar, "role": r.role}
@@ -872,6 +998,9 @@ def serialize_state() -> Dict[str, Any]:
         "automations": [{"id": r.id, "name": r.name, "category": r.category, "enabled": r.enabled, "trigger": r.trigger, "action": r.action} for r in automation_rows],
         "automationRuns": [{"id": r.id, "automationId": r.automation_id, "trigger": r.trigger, "sourceType": r.source_type, "sourceId": r.source_id, "status": r.status, "summary": r.summary, "details": r.details or {}, "createdAt": r.created_at.isoformat()} for r in automation_run_rows],
         "customFields": [{"id": r.id, "name": r.name, "type": r.type, "scope": r.scope, "options": r.options or []} for r in custom_field_rows],
+        "calendarEvents": [{"id": r.id, "title": r.title, "kind": r.kind, "startAt": r.start_at, "endAt": r.end_at, "source": r.source, "taskId": r.task_id, "ownerId": r.owner_id, "color": r.color, "metadata": r.metadata_json or {}} for r in calendar_event_rows],
+        "plannerBlocks": [{"id": r.id, "taskId": r.task_id, "title": r.title, "ownerId": r.owner_id, "startAt": r.start_at, "endAt": r.end_at, "blockType": r.block_type, "status": r.status, "score": r.score, "reason": r.reason} for r in planner_block_rows],
+        "plannerPreferences": dict(pref_row._mapping) if pref_row else {"workspace_id": DEFAULT_WORKSPACE_ID, "workday_start": "08:30", "workday_end": "17:00", "lunch_start": "12:00", "lunch_end": "13:00", "focus_block_minutes": 90, "auto_schedule_blocked": False},
     }
 
 
@@ -917,6 +1046,8 @@ def health() -> Dict[str, Any]:
                 "forms": conn.execute(select(func.count()).select_from(forms)).scalar_one(),
                 "form_submissions": conn.execute(select(func.count()).select_from(form_submissions)).scalar_one(),
                 "automation_runs": conn.execute(select(func.count()).select_from(automation_runs)).scalar_one(),
+                "calendar_events": conn.execute(select(func.count()).select_from(calendar_events)).scalar_one(),
+                "planner_blocks": conn.execute(select(func.count()).select_from(planner_blocks)).scalar_one(),
             }
         db_ok = True
     except SQLAlchemyError:
@@ -926,7 +1057,7 @@ def health() -> Dict[str, Any]:
         "status": "ok" if db_ok else "degraded",
         "version": APP_VERSION,
         "database": engine.dialect.name,
-        "schema": "intake-automation-v0.5",
+        "schema": "planner-scheduling-v0.6",
         "auth": "enabled",
         "workspace_id": DEFAULT_WORKSPACE_ID,
         "tables": table_counts,
@@ -969,8 +1100,9 @@ def api_schema() -> Dict[str, Any]:
             "users", "workspaces", "workspace_members", "spaces", "folders", "lists", "task_statuses", "tasks",
             "task_comments", "custom_fields", "custom_field_values", "notifications", "dashboards", "forms",
             "docs", "goals", "automations", "automation_runs", "activity_logs", "sessions", "report_cards", "form_submissions",
+            "calendar_events", "planner_blocks", "planner_preferences",
         ],
-        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1-v0.5 frontend state shape. Reports now have derived dashboard endpoints, action APIs, form submission APIs, and automation run APIs.",
+        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1-v0.6 frontend state shape. v0.6 adds planner/calendar scheduling endpoints, AI schedule generation, time blocks, report APIs, form submission APIs, and automation run APIs.",
     }
 
 
@@ -1342,6 +1474,300 @@ def api_project_intake(payload: IntakePayload, current_user: Optional[Dict[str, 
 
 
 
+# -----------------------------
+# v0.6 Planner + AI Scheduling
+# -----------------------------
+def parse_iso_datetime(value: str) -> datetime:
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        dt = datetime.fromisoformat(value + "+00:00")
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def combine_date_time(day: str, time_value: str) -> datetime:
+    return datetime.fromisoformat(f"{day}T{time_value}:00").replace(tzinfo=timezone.utc)
+
+
+def to_iso_minute(dt: datetime) -> str:
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.replace(second=0, microsecond=0).isoformat(timespec="minutes") + ":00"
+
+
+def serialize_calendar_event(row: Any) -> Dict[str, Any]:
+    return {
+        "id": row.id,
+        "title": row.title,
+        "kind": row.kind,
+        "startAt": row.start_at,
+        "endAt": row.end_at,
+        "source": row.source,
+        "taskId": row.task_id,
+        "ownerId": row.owner_id,
+        "color": row.color,
+        "metadata": row.metadata_json or {},
+    }
+
+
+def serialize_planner_block(row: Any) -> Dict[str, Any]:
+    return {
+        "id": row.id,
+        "taskId": row.task_id,
+        "title": row.title,
+        "ownerId": row.owner_id,
+        "startAt": row.start_at,
+        "endAt": row.end_at,
+        "blockType": row.block_type,
+        "status": row.status,
+        "score": row.score,
+        "reason": row.reason,
+    }
+
+
+def task_priority_score(task_row: Any, plan_day: str) -> float:
+    base = {"Urgent": 100, "High": 75, "Normal": 45, "Low": 20}.get(task_row.priority, 35)
+    try:
+        due = datetime.fromisoformat((task_row.due or plan_day) + "T00:00:00")
+        day = datetime.fromisoformat(plan_day + "T00:00:00")
+        days_until_due = (due - day).days
+        if days_until_due < 0:
+            base += 35
+        elif days_until_due <= 1:
+            base += 25
+        elif days_until_due <= 3:
+            base += 12
+    except Exception:
+        base += 0
+    if task_row.critical:
+        base += 18
+    if task_row.status == "BLOCKED":
+        base -= 50
+    if task_row.progress and task_row.progress > 50:
+        base += 5
+    return max(base, 0)
+
+
+def occupied_intervals_for_day(events: List[Any], blocks: List[Any], day: str) -> List[tuple[datetime, datetime]]:
+    intervals: List[tuple[datetime, datetime]] = []
+    for item in list(events) + list(blocks):
+        start_value = getattr(item, "start_at", None)
+        end_value = getattr(item, "end_at", None)
+        if not start_value or not str(start_value).startswith(day):
+            continue
+        try:
+            intervals.append((parse_iso_datetime(str(start_value)), parse_iso_datetime(str(end_value))))
+        except Exception:
+            continue
+    intervals.sort(key=lambda x: x[0])
+    return intervals
+
+
+def free_intervals(day: str, prefs: Any, occupied: List[tuple[datetime, datetime]]) -> List[tuple[datetime, datetime]]:
+    work_start = combine_date_time(day, getattr(prefs, "workday_start", "08:30"))
+    work_end = combine_date_time(day, getattr(prefs, "workday_end", "17:00"))
+    lunch_start = combine_date_time(day, getattr(prefs, "lunch_start", "12:00"))
+    lunch_end = combine_date_time(day, getattr(prefs, "lunch_end", "13:00"))
+    intervals = sorted(occupied + [(lunch_start, lunch_end)], key=lambda x: x[0])
+    cursor = work_start
+    free: List[tuple[datetime, datetime]] = []
+    for start, end in intervals:
+        if end <= work_start or start >= work_end:
+            continue
+        start = max(start, work_start)
+        end = min(end, work_end)
+        if start > cursor:
+            free.append((cursor, start))
+        if end > cursor:
+            cursor = end
+    if cursor < work_end:
+        free.append((cursor, work_end))
+    return [(s, e) for s, e in free if (e - s).total_seconds() >= 30 * 60]
+
+
+def build_ai_schedule(conn, payload: PlannerSchedulePayload) -> Dict[str, Any]:
+    ensure_default_planner_data()
+    plan_day = payload.date or utc_now().date().isoformat()
+    pref = conn.execute(select(planner_preferences).where(planner_preferences.c.workspace_id == DEFAULT_WORKSPACE_ID)).first()
+    if not pref:
+        conn.execute(planner_preferences.insert().values(workspace_id=DEFAULT_WORKSPACE_ID, workday_start="08:30", workday_end="17:00", lunch_start="12:00", lunch_end="13:00", focus_block_minutes=90, auto_schedule_blocked=False, updated_at=utc_now()))
+        pref = conn.execute(select(planner_preferences).where(planner_preferences.c.workspace_id == DEFAULT_WORKSPACE_ID)).first()
+    if payload.regenerate:
+        conn.execute(delete(planner_blocks).where(planner_blocks.c.workspace_id == DEFAULT_WORKSPACE_ID).where(planner_blocks.c.block_type == "ai_task").where(planner_blocks.c.start_at.like(f"{plan_day}%")))
+    events_rows = conn.execute(select(calendar_events).where(calendar_events.c.workspace_id == DEFAULT_WORKSPACE_ID).where(calendar_events.c.start_at.like(f"{plan_day}%")).order_by(calendar_events.c.start_at)).all()
+    existing_blocks = conn.execute(select(planner_blocks).where(planner_blocks.c.workspace_id == DEFAULT_WORKSPACE_ID).where(planner_blocks.c.start_at.like(f"{plan_day}%")).where(planner_blocks.c.block_type != "ai_task").order_by(planner_blocks.c.start_at)).all()
+    task_rows = conn.execute(select(tasks).where(tasks.c.workspace_id == DEFAULT_WORKSPACE_ID).where(tasks.c.status != "DONE")).all()
+    candidates = []
+    for row in task_rows:
+        if row.status == "BLOCKED" and not pref.auto_schedule_blocked:
+            continue
+        candidates.append((task_priority_score(row, plan_day), row))
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    free = free_intervals(plan_day, pref, occupied_intervals_for_day(events_rows, existing_blocks, plan_day))
+    created = []
+    cursor_slots = list(free)
+    block_minutes = int(getattr(pref, "focus_block_minutes", 90) or 90)
+    if payload.regenerate:
+        for score, task_row in candidates:
+            if not cursor_slots:
+                break
+            needed = max(30, min(block_minutes, int((task_row.estimate or 1) * 60)))
+            for idx, (slot_start, slot_end) in enumerate(list(cursor_slots)):
+                available = int((slot_end - slot_start).total_seconds() // 60)
+                if available < 30:
+                    continue
+                duration = min(needed, available)
+                end = slot_start + timedelta(minutes=duration)
+                reason_bits = [f"priority {task_row.priority}"]
+                if task_row.critical:
+                    reason_bits.append("critical path")
+                if task_row.due:
+                    reason_bits.append(f"due {task_row.due}")
+                block_id = make_id("pb")
+                conn.execute(planner_blocks.insert().values(
+                    id=block_id, workspace_id=DEFAULT_WORKSPACE_ID, task_id=task_row.id, title=task_row.name,
+                    owner_id=task_row.assignee_id or payload.owner_id, start_at=to_iso_minute(slot_start), end_at=to_iso_minute(end),
+                    block_type="ai_task", status="planned", score=float(score), reason="AI scheduled from " + ", ".join(reason_bits),
+                    created_at=utc_now(), updated_at=utc_now(),
+                ))
+                created.append(block_id)
+                if (slot_end - end).total_seconds() >= 30 * 60:
+                    cursor_slots[idx] = (end, slot_end)
+                else:
+                    cursor_slots.pop(idx)
+                break
+    block_rows = conn.execute(select(planner_blocks).where(planner_blocks.c.workspace_id == DEFAULT_WORKSPACE_ID).where(planner_blocks.c.start_at.like(f"{plan_day}%")).order_by(planner_blocks.c.start_at)).all()
+    event_rows = conn.execute(select(calendar_events).where(calendar_events.c.workspace_id == DEFAULT_WORKSPACE_ID).where(calendar_events.c.start_at.like(f"{plan_day}%")).order_by(calendar_events.c.start_at)).all()
+    risks = []
+    overdue_count = 0
+    blocked_count = 0
+    for _, task_row in candidates:
+        if task_row.due and task_row.due < plan_day:
+            overdue_count += 1
+        if task_row.status == "BLOCKED":
+            blocked_count += 1
+    if overdue_count:
+        risks.append({"level": "high", "title": f"{overdue_count} overdue tasks need attention", "recommendation": "Schedule recovery work or renegotiate due dates."})
+    if blocked_count:
+        risks.append({"level": "medium", "title": f"{blocked_count} blocked tasks excluded from schedule", "recommendation": "Resolve blockers before AI can schedule execution time."})
+    if len(created) < min(3, len(candidates)):
+        risks.append({"level": "medium", "title": "Limited free time available", "recommendation": "Add focus blocks or move lower priority meetings."})
+    return {
+        "date": plan_day,
+        "events": [serialize_calendar_event(r) for r in event_rows],
+        "blocks": [serialize_planner_block(r) for r in block_rows],
+        "risks": risks,
+        "metrics": {
+            "scheduledBlocks": len(block_rows),
+            "aiScheduled": len(created),
+            "meetings": len(event_rows),
+            "freeSlotsRemaining": len(cursor_slots),
+            "candidateTasks": len(candidates),
+        },
+        "preferences": dict(pref._mapping),
+    }
+
+
+@app.get("/api/planner")
+def api_planner(date: Optional[str] = None) -> Dict[str, Any]:
+    ensure_default_planner_data()
+    plan_day = date or utc_now().date().isoformat()
+    with engine.begin() as conn:
+        # Build a read-only view without regenerating by setting regenerate False.
+        return build_ai_schedule(conn, PlannerSchedulePayload(date=plan_day, regenerate=False))
+
+
+@app.post("/api/planner/plan-my-day")
+def api_plan_my_day(payload: PlannerSchedulePayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        data = build_ai_schedule(conn, payload)
+        log_event(conn, "planner.ai_schedule.generated", "workspace", DEFAULT_WORKSPACE_ID, f"AI generated schedule for {data['date']}", actor, data["metrics"])
+        record_automation_run(conn, "auto_ai_schedule", "Plan my day", "planner", data["date"], f"Generated {data['metrics']['aiScheduled']} AI schedule blocks", data["metrics"])
+    return {"ok": True, **data, "state": serialize_state()}
+
+
+@app.get("/api/planner/events")
+def api_planner_events(date: Optional[str] = None) -> Dict[str, Any]:
+    ensure_default_planner_data()
+    with engine.begin() as conn:
+        query = select(calendar_events).where(calendar_events.c.workspace_id == DEFAULT_WORKSPACE_ID)
+        if date:
+            query = query.where(calendar_events.c.start_at.like(f"{date}%"))
+        rows = conn.execute(query.order_by(calendar_events.c.start_at)).all()
+    return {"events": [serialize_calendar_event(r) for r in rows]}
+
+
+@app.post("/api/planner/events")
+def api_create_planner_event(payload: CalendarEventPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    event_id = make_id("ce")
+    with engine.begin() as conn:
+        conn.execute(calendar_events.insert().values(
+            id=event_id, workspace_id=DEFAULT_WORKSPACE_ID, title=payload.title, kind=payload.kind,
+            start_at=payload.start_at, end_at=payload.end_at, source=payload.source, task_id=payload.task_id,
+            owner_id=payload.owner_id, color=payload.color, metadata_json=payload.metadata,
+            created_at=utc_now(), updated_at=utc_now(),
+        ))
+        log_event(conn, "planner.event.created", "calendar_event", event_id, f"Created planner event: {payload.title}", actor, {})
+        row = conn.execute(select(calendar_events).where(calendar_events.c.id == event_id)).first()
+    return {"ok": True, "event": serialize_calendar_event(row), "state": serialize_state()}
+
+
+@app.post("/api/planner/tasks/{task_id}/schedule")
+def api_schedule_task(task_id: str, payload: TaskSchedulePayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    start = combine_date_time(payload.date, payload.start_time)
+    end = start + timedelta(minutes=payload.duration_minutes)
+    with engine.begin() as conn:
+        task_row = conn.execute(select(tasks).where(tasks.c.id == task_id)).first()
+        if not task_row:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        block_id = make_id("pb")
+        conn.execute(planner_blocks.insert().values(
+            id=block_id, workspace_id=DEFAULT_WORKSPACE_ID, task_id=task_id, title=task_row.name,
+            owner_id=payload.owner_id, start_at=to_iso_minute(start), end_at=to_iso_minute(end),
+            block_type="task", status="planned", score=task_priority_score(task_row, payload.date), reason=payload.reason,
+            created_at=utc_now(), updated_at=utc_now(),
+        ))
+        conn.execute(tasks.update().where(tasks.c.id == task_id).values(start=payload.date, updated_at=utc_now()))
+        log_event(conn, "planner.task.scheduled", "task", task_id, f"Scheduled task: {task_row.name}", actor, {"start": to_iso_minute(start), "end": to_iso_minute(end)})
+        block = conn.execute(select(planner_blocks).where(planner_blocks.c.id == block_id)).first()
+    return {"ok": True, "block": serialize_planner_block(block), "state": serialize_state()}
+
+
+@app.post("/api/planner/focus-blocks")
+def api_create_focus_block(payload: FocusBlockPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    start = combine_date_time(payload.date, payload.start_time)
+    end = start + timedelta(minutes=payload.duration_minutes)
+    block_id = make_id("pb")
+    with engine.begin() as conn:
+        conn.execute(planner_blocks.insert().values(
+            id=block_id, workspace_id=DEFAULT_WORKSPACE_ID, task_id=None, title=payload.title,
+            owner_id=payload.owner_id, start_at=to_iso_minute(start), end_at=to_iso_minute(end),
+            block_type="focus", status="protected", score=0, reason=payload.reason,
+            created_at=utc_now(), updated_at=utc_now(),
+        ))
+        log_event(conn, "planner.focus.created", "planner_block", block_id, f"Created focus block: {payload.title}", actor, {})
+        block = conn.execute(select(planner_blocks).where(planner_blocks.c.id == block_id)).first()
+    return {"ok": True, "block": serialize_planner_block(block), "state": serialize_state()}
+
+
+@app.delete("/api/planner/blocks/{block_id}")
+def api_delete_planner_block(block_id: str, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        row = conn.execute(select(planner_blocks).where(planner_blocks.c.id == block_id)).first()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Planner block {block_id} not found")
+        conn.execute(delete(planner_blocks).where(planner_blocks.c.id == block_id))
+        log_event(conn, "planner.block.deleted", "planner_block", block_id, f"Removed planner block: {row.title}", actor, {})
+    return {"ok": True, "state": serialize_state()}
+
+
 def task_matches_filters(task: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     if not filters:
         return True
@@ -1392,7 +1818,7 @@ def compute_report_dataset(filters: Optional[Dict[str, Any]] = None) -> Dict[str
     completion = round((len(done) / len(filtered)) * 100) if filtered else 0
     utilization = round((tracked_hours / estimate_hours) * 100) if estimate_hours else 0
     return {
-        "schema": "intake-automation-v0.5",
+        "schema": "planner-scheduling-v0.6",
         "generated_at": utc_now().isoformat(),
         "filters": filters or {},
         "summary": {
@@ -1528,7 +1954,7 @@ def api_ai_summary() -> Dict[str, Any]:
             "Validate normalized table writes from List and Board views",
             "Move dashboard cards from derived frontend state to report endpoints",
             "Add real role enforcement for workspace members",
-            "Expand v0.5 forms and automations with report-triggered workflows",
+            "Expand v0.6 planner with dependency-aware scheduling and Gantt updates",
         ],
         "sources": [t.get("name") for t in due_soon],
     }

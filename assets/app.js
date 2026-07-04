@@ -1,7 +1,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const STORAGE_KEY = 'thing-planner-workos-v030-state';
+const STORAGE_KEY = 'thing-planner-workos-v040-state';
 const API_BASE = window.THING_PLANNER_API_BASE || '/api';
 let apiOnline = false;
 let apiStatusText = 'Local demo mode';
@@ -9,9 +9,11 @@ let hasBootstrappedApi = false;
 let suppressApiSync = false;
 let syncTimer = null;
 let lastSyncAt = null;
-let authToken = localStorage.getItem('thing-planner-workos-v030-token') || null;
+let authToken = localStorage.getItem('thing-planner-workos-v040-token') || null;
 let currentUser = null;
 let authStatusText = 'Demo auth pending';
+let lastReportDataset = null;
+let reportStatusText = 'Local report engine';
 
 const seedState = {
   module: 'home',
@@ -19,7 +21,7 @@ const seedState = {
   selectedProject: 'p1',
   helper: true,
   aiPromo: true,
-  version: '0.3.0',
+  version: '0.4.0',
   workspace: {
     name: "Adrian Francis's Workspace",
     initials: 'A',
@@ -67,6 +69,16 @@ const seedState = {
   dashboards: [
     { id: 'd1', name: 'Executive PMO Dashboard', private: false, favorite: true },
   ],
+  reportCards: [
+    { id: 'rc1', title: 'Open Tasks', type: 'kpi', metric: 'open_tasks' },
+    { id: 'rc2', title: 'Blocked Work', type: 'kpi', metric: 'blocked_tasks' },
+    { id: 'rc3', title: 'Billable Hours', type: 'kpi', metric: 'billable_hours' },
+    { id: 'rc4', title: 'Project Health', type: 'ai', metric: 'health' },
+    { id: 'rc5', title: 'Work by Status', type: 'chart', metric: 'by_status' },
+    { id: 'rc6', title: 'Team Productivity', type: 'chart', metric: 'by_assignee' },
+    { id: 'rc7', title: 'Actionable Work Table', type: 'table', metric: 'work_table' },
+  ],
+  reportFilter: 'all',
   forms: [
     { id: 'form1', name: 'Project Intake', description: 'Streamline new project requests', submissions: 3, favorite: false },
     { id: 'form2', name: 'IT Requests', description: 'Triage and prioritize service requests', submissions: 7, favorite: true },
@@ -152,7 +164,7 @@ async function ensureDemoAuth() {
       const data = await response.json();
       authToken = data.token;
       currentUser = data.user;
-      localStorage.setItem('thing-planner-workos-v030-token', authToken);
+      localStorage.setItem('thing-planner-workos-v040-token', authToken);
       authStatusText = `Demo auth: ${currentUser.display_name || currentUser.email}`;
     }
   } catch (error) {
@@ -170,7 +182,7 @@ async function hydrateFromApi() {
     if (!response.ok) throw new Error('State fetch failed');
     const data = await response.json();
     apiOnline = true;
-    apiStatusText = `${healthJson.version || 'v0.3.0'} ${healthJson.schema || 'API'} connected`;
+    apiStatusText = `${healthJson.version || 'v0.4.0'} ${healthJson.schema || 'API'} connected`;
     await ensureDemoAuth();
     hasBootstrappedApi = true;
     if (data && data.state) {
@@ -178,6 +190,7 @@ async function hydrateFromApi() {
       state = { ...state, ...data.state };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       render();
+      await refreshReportDataset(true);
       suppressApiSync = false;
     }
   } catch (error) {
@@ -187,6 +200,28 @@ async function hydrateFromApi() {
     console.warn('Using local demo data because API is unavailable', error);
     const badge = document.querySelector('.api-status-badge');
     if (badge) { badge.textContent = apiStatusText; badge.classList.remove('online'); badge.classList.add('offline'); }
+  }
+}
+
+async function refreshReportDataset(silent=false) {
+  if (!apiOnline) {
+    lastReportDataset = computeLocalReportDataset();
+    reportStatusText = 'Local report engine';
+    if (!silent) toast('Reports refreshed locally');
+    return lastReportDataset;
+  }
+  try {
+    const response = await fetch(`${API_BASE}/reports/dashboard?dashboard_id=d1`, { headers: authHeaders(), cache: 'no-store' });
+    if (!response.ok) throw new Error('Report API failed');
+    lastReportDataset = await response.json();
+    reportStatusText = 'Server report engine synced';
+    if (!silent) toast('Dashboard report data refreshed from API');
+    return lastReportDataset;
+  } catch (error) {
+    lastReportDataset = computeLocalReportDataset();
+    reportStatusText = 'Report API offline - local derived data';
+    if (!silent) toast('Report API offline; using local reports');
+    return lastReportDataset;
   }
 }
 
@@ -263,7 +298,7 @@ function renderTopbar() {
       </button>
       <button class="top-icon" onclick="setModule('planner')">▣</button>
       <button class="top-icon" onclick="toast('No workspace warnings today')">⚠</button>
-      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.3 normalized data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
+      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.4 reporting/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
     </div>
     <div class="global-search-wrap">
       <label class="global-search"><span>⌕</span><input id="globalSearch" placeholder="Search ⌘K" onkeydown="if(event.key==='Enter') globalSearch(this.value)" /></label>
@@ -768,51 +803,170 @@ function addComment(id, text) {
 function aiTaskSummary(id) { const t=state.tasks.find(x=>x.id===id); toast(`AI summary generated for ${t.name}`); }
 function aiCreateSubtasks(id) { const t=state.tasks.find(x=>x.id===id); toast(`AI drafted 4 subtasks for ${t.name}`); }
 
+function computeLocalReportDataset() {
+  const filter = state.reportFilter || 'all';
+  const tasks = filter === 'project1' ? state.tasks.filter(t => t.projectId === 'p1') : filter === 'project2' ? state.tasks.filter(t => t.projectId === 'p2') : state.tasks;
+  const done = tasks.filter(t => t.status === 'DONE');
+  const open = tasks.filter(t => t.status !== 'DONE');
+  const blocked = tasks.filter(t => t.status === 'BLOCKED');
+  const tracked = tasks.reduce((sum,t) => sum + Number(t.tracked || 0), 0);
+  const estimate = tasks.reduce((sum,t) => sum + Number(t.estimate || 0), 0);
+  const billable = tasks.filter(t => t.billable).reduce((sum,t) => sum + Number(t.tracked || 0), 0);
+  const byStatus = statuses.reduce((acc,s) => ({...acc, [s]: tasks.filter(t=>t.status===s).length}), {});
+  const byPriority = ['Urgent','High','Normal','Low'].reduce((acc,p) => ({...acc, [p]: tasks.filter(t=>t.priority===p).length}), {});
+  const byAssignee = state.members.map(m => {
+    const owned = tasks.filter(t => t.assignee === m.id);
+    return { id:m.id, name:m.name, tasks: owned.length, done: owned.filter(t=>t.status==='DONE').length, tracked: owned.reduce((s,t)=>s+Number(t.tracked||0),0), estimate: owned.reduce((s,t)=>s+Number(t.estimate||0),0) };
+  });
+  const risks = tasks.filter(t => t.status === 'BLOCKED' || (t.critical && t.status !== 'DONE'));
+  const health = blocked.length || risks.length >= 2 ? 'At Risk' : 'On Track';
+  return {
+    schema: 'local-reporting-v0.4',
+    generated_at: new Date().toISOString(),
+    summary: { total_tasks: tasks.length, open_tasks: open.length, completed_tasks: done.length, blocked_tasks: blocked.length, billable_hours: Number(billable.toFixed(1)), tracked_hours: Number(tracked.toFixed(1)), estimate_hours: Number(estimate.toFixed(1)), completion_pct: tasks.length ? Math.round(done.length/tasks.length*100) : 0, utilization_pct: estimate ? Math.round(tracked/estimate*100) : 0, health },
+    by_status: byStatus,
+    by_priority: byPriority,
+    by_assignee: byAssignee,
+    work_table: tasks,
+    blockers: blocked,
+    risks,
+    forms: state.forms,
+    goals: state.goals,
+  };
+}
+
+function dashboardDataset() {
+  if (lastReportDataset?.dataset) return lastReportDataset.dataset;
+  return computeLocalReportDataset();
+}
+
 function renderDashboardMain() {
   if (!state.dashboards.length) return renderDashboardTemplates();
-  const tasks = state.tasks;
-  const done = tasks.filter(t => t.status === 'DONE').length;
-  const blocked = tasks.filter(t => t.status === 'BLOCKED').length;
-  const tracked = tasks.reduce((sum,t) => sum + Number(t.tracked || 0), 0);
-  const billable = tasks.filter(t => t.billable).reduce((sum,t) => sum + Number(t.tracked || 0), 0);
-  return `<div class="content">
-    <div class="section-title"><div><h2>Executive PMO Dashboard</h2><p style="margin:4px 0 0;color:var(--muted)">Live reports connected directly to tasks, forms, time, and AI signals.</p></div><div><button class="btn-secondary" onclick="renderDashboardTemplatesOnly()">Templates</button> <button class="btn-primary" onclick="toast('Add card drawer placeholder')">＋ Add Card</button></div></div>
-    <div class="cards-grid">
-      ${kpi('Open Tasks', tasks.filter(t=>t.status!=='DONE').length, 'Update status directly from report')}
-      ${kpi('Blocked', blocked, blocked ? 'Needs escalation' : 'No blockers', blocked ? 'red' : 'green')}
-      ${kpi('Billable Hours', billable.toFixed(1), `${Math.round((billable/(tracked||1))*100)}% of tracked time`)}
-      ${kpi('Completion', `${Math.round(done/tasks.length*100)}%`, 'Across active portfolio', 'green')}
+  const dataset = dashboardDataset();
+  const summary = dataset.summary;
+  const cards = state.reportCards && state.reportCards.length ? state.reportCards : seedState.reportCards;
+  return `<div class="content wide">
+    <div class="section-title"><div><h2>Executive PMO Dashboard</h2><p style="margin:4px 0 0;color:var(--muted)">v0.4 report engine: live cards, drill-downs, filters, and dashboard actions that update real work.</p></div><div><button class="btn-secondary" onclick="renderDashboardTemplatesOnly()">Templates</button> <button class="btn-secondary" onclick="refreshReportDataset()">⟳ Refresh reports</button> <button class="btn-primary" onclick="addReportCard()">＋ Add Card</button></div></div>
+    <div class="report-toolbar">
+      <button class="pill-control ${state.reportFilter==='all'?'active':''}" onclick="setReportFilter('all')">All work</button>
+      <button class="pill-control ${state.reportFilter==='project1'?'active':''}" onclick="setReportFilter('project1')">Project 1</button>
+      <button class="pill-control ${state.reportFilter==='project2'?'active':''}" onclick="setReportFilter('project2')">Project 2</button>
+      <span class="report-status">${reportStatusText} • ${new Date(dataset.generated_at).toLocaleTimeString()}</span>
     </div>
-    <div class="section-title"><h2>Custom reports you can work from</h2><button class="btn-secondary" onclick="setModule('ai')">Ask AI for update</button></div>
-    <div class="dashboard-grid">
+    <div class="cards-grid report-kpis">
+      ${renderReportCard(cards.find(c=>c.metric==='open_tasks') || {title:'Open Tasks', metric:'open_tasks'}, dataset)}
+      ${renderReportCard(cards.find(c=>c.metric==='blocked_tasks') || {title:'Blocked Work', metric:'blocked_tasks'}, dataset)}
+      ${renderReportCard(cards.find(c=>c.metric==='billable_hours') || {title:'Billable Hours', metric:'billable_hours'}, dataset)}
+      ${renderReportCard(cards.find(c=>c.metric==='health') || {title:'Project Health', metric:'health'}, dataset)}
+    </div>
+    <div class="section-title"><h2>Custom reports you can actually work from</h2><button class="btn-secondary" onclick="setModule('ai')">Ask AI for update</button></div>
+    <div class="dashboard-grid v040">
       <div class="report-card">
-        <h3>Campaign performance</h3>
-        <div class="chart-bars">${[45,78,66,84,52,92].map(v => `<div class="chart-bar" style="height:${v}%">${v}</div>`).join('')}</div>
-        <p style="color:var(--muted)">Task throughput and content/campaign delivery trend. Click a task below to update work without leaving the dashboard.</p>
-        ${renderInlineTaskActionTable(state.tasks.filter(t => t.tags.includes('Dashboard') || t.tags.includes('Forms') || t.projectId==='p1').slice(0,5))}
+        <div class="report-card-head"><h3>Campaign performance</h3><span class="badge green">Actionable</span></div>
+        <div class="chart-bars">${[summary.completion_pct, 78, Math.max(18, summary.utilization_pct), 84, 52, 92].map(v => `<div class="chart-bar" style="height:${Math.min(100,Math.max(12,v))}%">${v}</div>`).join('')}</div>
+        <p style="color:var(--muted)">Throughput, utilization, and completion are tied to source tasks. Use the controls below to update work without switching tools.</p>
+        ${renderInlineTaskActionTable(dataset.work_table.filter(t => t.tags.includes('Dashboard') || t.tags.includes('Forms') || t.projectId==='p1').slice(0,6))}
       </div>
       <div class="report-card">
-        <h3>Project health AI Card</h3>
-        <div class="donut"><div class="donut-inner">64%</div></div>
-        <p style="color:var(--muted)"><b>AI finding:</b> Project 1 is progressing, but the intake automation is blocked and sits on a critical path. Recommend escalation today.</p>
-        <button class="btn-primary" onclick="setModule('ai')">Generate status report</button>
+        <div class="report-card-head"><h3>AI Project Health Card</h3><span class="badge ${summary.health==='At Risk'?'warn':'green'}">${summary.health}</span></div>
+        <div class="donut" style="background: conic-gradient(var(--primary) 0 ${summary.completion_pct}%, #e9e7ef ${summary.completion_pct}% 100%)"><div class="donut-inner">${summary.completion_pct}%</div></div>
+        <p style="color:var(--muted)"><b>AI finding:</b> ${summary.health === 'At Risk' ? `There are ${summary.blocked_tasks} blocked items and ${dataset.risks.length} schedule risks. Escalate critical path tasks today.` : 'Portfolio looks on track. Keep focus on upcoming due dates and billable accuracy.'}</p>
+        <div>${sourcePills(dataset.risks.slice(0,4).map(t=>t.name))}</div><br/>
+        <button class="btn-primary" onclick="runAISuggest('Status Report')">Generate status report</button>
       </div>
       <div class="report-card">
-        <h3>Team productivity</h3>
-        ${state.members.map(m => {
-          const owned = tasks.filter(t=>t.assignee===m.id);
-          const pct = Math.round((owned.filter(t=>t.status==='DONE').length/(owned.length||1))*100);
-          return `<div style="margin:12px 0"><div style="display:flex;justify-content:space-between"><b>${m.name}</b><span>${owned.length} tasks</span></div><div class="progress"><span style="width:${pct}%"></span></div></div>`;
+        <div class="report-card-head"><h3>Team productivity</h3><span class="badge">Live rollup</span></div>
+        ${dataset.by_assignee.map(m => {
+          const pct = Math.round((m.done/(m.tasks||1))*100);
+          return `<div class="team-rollup"><div style="display:flex;justify-content:space-between"><b>${escapeHtml(m.name)}</b><span>${m.tasks} tasks • ${Number(m.tracked).toFixed(1)}h</span></div><div class="progress"><span style="width:${pct}%"></span></div></div>`;
         }).join('')}
       </div>
       <div class="report-card">
-        <h3>Billable hours</h3>
-        ${tasks.filter(t=>t.billable).slice(0,5).map(t => `<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:8px 0"><span>${escapeHtml(t.name)}</span><b>${t.tracked}h</b></div>`).join('')}
+        <div class="report-card-head"><h3>Billable hours</h3><span class="badge green">${summary.billable_hours}h</span></div>
+        ${dataset.work_table.filter(t=>t.billable).slice(0,6).map(t => `<div class="billable-row"><span onclick="openTask('${t.id}')">${escapeHtml(t.name)}</span><b>${t.tracked}h</b><button class="btn-secondary btn-small" onclick="dashboardAction('${t.id}','toggle_billable')">Toggle</button></div>`).join('')}
         <br/><button class="btn-secondary" onclick="setModule('planner')">Plan remaining work</button>
+      </div>
+      <div class="report-card wide-card">
+        <div class="report-card-head"><h3>Drill-down: Work by status</h3><span class="badge">Click to filter</span></div>
+        <div class="status-drill-grid">${Object.entries(dataset.by_status).map(([name,count]) => `<button class="status-drill" onclick="drilldownReport('status:${name}')"><span class="status-pill ${statusClass[name]||''}">${name}</span><b>${count}</b></button>`).join('')}</div>
+      </div>
+      <div class="report-card wide-card">
+        <div class="report-card-head"><h3>Risk and blocker action queue</h3><span class="badge warn">${dataset.risks.length} risks</span></div>
+        ${renderInlineTaskActionTable(dataset.risks.slice(0,8))}
       </div>
     </div>
     ${state.aiPromo ? renderBrainPromoWidget() : ''}
   </div>`;
+}
+
+function renderReportCard(card, dataset) {
+  const s = dataset.summary;
+  const metricMap = {
+    open_tasks: [s.open_tasks, 'Update status directly from report'],
+    blocked_tasks: [s.blocked_tasks, s.blocked_tasks ? 'Needs escalation' : 'No blockers'],
+    billable_hours: [Number(s.billable_hours).toFixed(1), `${Math.round((s.billable_hours/(s.tracked_hours||1))*100)}% of tracked time`],
+    health: [s.health, `${s.completion_pct}% complete • ${dataset.risks.length} risks`],
+  };
+  const [value, trend] = metricMap[card.metric] || [s.total_tasks, 'Live metric'];
+  const tone = card.metric === 'blocked_tasks' && Number(value) > 0 ? 'red' : card.metric === 'health' && value === 'At Risk' ? 'red' : 'green';
+  return `<div class="kpi-card report-card-live" onclick="drilldownReport('${card.metric === 'health' ? 'open_tasks' : card.metric}')"><div class="label">${escapeHtml(card.title)}</div><div class="value">${value}</div><div class="trend ${tone==='red'?'red':''}">${trend}</div><div class="card-actions"><button class="btn-secondary btn-small" onclick="event.stopPropagation(); drilldownReport('${card.metric === 'health' ? 'open_tasks' : card.metric}')">Drill down</button></div></div>`;
+}
+
+function setReportFilter(filter) { state.reportFilter = filter; lastReportDataset = null; toast(`Report filter: ${filter}`); render(); }
+
+function addReportCard() {
+  const title = prompt('Report card title', 'Custom Risk Card');
+  if (!title) return;
+  const metric = prompt('Metric: open_tasks, blocked_tasks, billable_hours, health, by_status, by_assignee', 'blocked_tasks') || 'open_tasks';
+  state.reportCards = state.reportCards || [];
+  state.reportCards.push({ id: uid(), title, type: metric.includes('by_') ? 'chart' : 'kpi', metric });
+  toast('Report card added');
+  render();
+}
+
+async function dashboardAction(taskId, action, value=null) {
+  const task = state.tasks.find(t => t.id === taskId);
+  if (!task) return;
+  if (apiOnline) {
+    try {
+      const response = await fetch(`${API_BASE}/reports/actions`, { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ task_id: taskId, action, value, comment: value }) });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.state) { state = { ...state, ...data.state }; localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+        lastReportDataset = data.dataset ? { dataset: data.dataset } : null;
+        toast('Dashboard action saved through API');
+        render();
+        return;
+      }
+    } catch (error) { console.warn('Report action API failed; applying locally', error); }
+  }
+  if (action === 'set_status') updateTask(taskId, 'status', value);
+  if (action === 'assign') updateTask(taskId, 'assignee', value);
+  if (action === 'set_due') updateTask(taskId, 'due', value);
+  if (action === 'toggle_billable') updateTask(taskId, 'billable', !task.billable);
+  if (action === 'add_comment') addComment(taskId, value || 'Dashboard follow-up');
+}
+
+async function drilldownReport(metric) {
+  if (apiOnline) {
+    try {
+      const response = await fetch(`${API_BASE}/reports/drilldown?metric=${encodeURIComponent(metric)}`, { headers: authHeaders(), cache:'no-store' });
+      if (response.ok) {
+        const data = await response.json();
+        toast(`${data.count} source records for ${metric}`);
+        if (data.tasks && data.tasks[0]) { state.module='spaces'; state.selectedProject=data.tasks[0].projectId || 'p1'; selectedTaskId=data.tasks[0].id; render(); }
+        return;
+      }
+    } catch (error) { console.warn('Drilldown API failed', error); }
+  }
+  const dataset = computeLocalReportDataset();
+  let tasks = dataset.work_table;
+  if (metric === 'open_tasks') tasks = tasks.filter(t=>t.status!=='DONE');
+  if (metric === 'blocked_tasks') tasks = tasks.filter(t=>t.status==='BLOCKED');
+  if (metric === 'billable_hours') tasks = tasks.filter(t=>t.billable);
+  if (metric.startsWith('status:')) tasks = tasks.filter(t=>t.status===metric.split(':')[1]);
+  toast(`${tasks.length} source records for ${metric}`);
+  if (tasks[0]) { state.module='spaces'; state.selectedProject=tasks[0].projectId; selectedTaskId=tasks[0].id; render(); }
 }
 
 function renderDashboardTemplatesOnly(){ state.dashboards=[]; render(); }
@@ -831,10 +985,11 @@ function renderDashboardTemplates() {
     ${state.aiPromo ? renderBrainPromoWidget() : ''}
   </div>`;
 }
-function createDashboard() { state.dashboards.push({ id: uid(), name:'Executive PMO Dashboard', private:false, favorite:true }); toast('Dashboard created'); render(); }
+function createDashboard() { state.dashboards.push({ id: uid(), name:'Executive PMO Dashboard', private:false, favorite:true }); if (!state.reportCards) state.reportCards = structuredClone(seedState.reportCards); toast('Dashboard created'); render(); }
 function kpi(label, value, trend, tone='') { return `<div class="kpi-card"><div class="label">${label}</div><div class="value">${value}</div><div class="trend ${tone==='red'?'red':''}">${trend}</div></div>`; }
 function renderInlineTaskActionTable(tasks) {
-  return `<table class="inline-table"><thead><tr><th>Task</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${tasks.map(t => `<tr><td onclick="openTask('${t.id}')"><b>${escapeHtml(t.name)}</b></td><td><select class="inline-select" onchange="updateTask('${t.id}','status',this.value)">${statuses.map(s => `<option ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></td><td>${memberById(t.assignee).name}</td><td><button class="btn-secondary btn-small" onclick="openTask('${t.id}')">Open</button></td></tr>`).join('')}</tbody></table>`;
+  if (!tasks.length) return `<div class="empty-mini">No source records match this report.</div>`;
+  return `<table class="inline-table"><thead><tr><th>Task</th><th>Status</th><th>Owner</th><th>Due</th><th></th></tr></thead><tbody>${tasks.map(t => `<tr><td onclick="openTask('${t.id}')"><b>${escapeHtml(t.name)}</b><br/><span class="muted-mini">${t.tags.join(', ')}</span></td><td><select class="inline-select" onchange="dashboardAction('${t.id}','set_status',this.value)">${statuses.map(s => `<option ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></td><td><select class="inline-select" onchange="dashboardAction('${t.id}','assign',this.value)">${state.members.map(m => `<option value="${m.id}" ${t.assignee===m.id?'selected':''}>${escapeHtml(m.name)}</option>`).join('')}</select></td><td><input class="inline-input" type="date" value="${t.due}" onchange="dashboardAction('${t.id}','set_due',this.value)" /></td><td><button class="btn-secondary btn-small" onclick="openTask('${t.id}')">Open</button></td></tr>`).join('')}</tbody></table>`;
 }
 
 function renderFormsMain() {
@@ -1002,7 +1157,7 @@ function renderClipsMain() {
 
 function showDataLayerStatus() {
   const message = apiOnline
-    ? `Connected to the v0.3 normalized API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
+    ? `Connected to the v0.4 reporting API. ${authStatusText}. Last sync: ${lastSyncAt ? lastSyncAt.toLocaleTimeString() : 'just now'}.`
     : 'Running in local fallback mode. Start Docker Compose to enable FastAPI persistence.';
   toast(message);
 }
@@ -1012,10 +1167,10 @@ function renderDataLayerCards() {
   const projects = state.spaces.flatMap(s => s.folders || []).flatMap(f => f.lists || []).filter(l => l.kind === 'project').length;
   const comments = state.tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0);
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.3 Normalized Data</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
-    <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.4 Reporting + Data</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • report actions enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge green">Auth</span><h3>Demo sign-in</h3><div class="value">${currentUser ? 'Active' : 'Local'}</div><div class="trend">${authStatusText}<br/>Demo email: echofoxx@gmail.com</div><button class="btn-secondary" onclick="ensureDemoAuth(); toast('Demo authentication requested')">Sign in</button></div>
-    <div class="kpi-card"><span class="badge green">New</span><h3>API endpoints</h3><p class="trend">/api/auth/login, /api/schema, /api/activity, /api/state, /api/tasks, /api/reports/summary</p><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
+    <div class="kpi-card"><span class="badge green">New</span><h3>API endpoints</h3><p class="trend">/api/reports/dashboard, /api/reports/drilldown, /api/reports/actions, /api/reports/cards</p><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
   </div>`;
 }
 
@@ -1082,6 +1237,11 @@ window.openFormBuilder = openFormBuilder;
 window.submitFormDemo = submitFormDemo;
 window.createDashboard = createDashboard;
 window.renderDashboardTemplatesOnly = renderDashboardTemplatesOnly;
+window.setReportFilter = setReportFilter;
+window.refreshReportDataset = refreshReportDataset;
+window.addReportCard = addReportCard;
+window.dashboardAction = dashboardAction;
+window.drilldownReport = drilldownReport;
 window.toggleAutomation = toggleAutomation;
 window.aiTaskSummary = aiTaskSummary;
 window.aiCreateSubtasks = aiCreateSubtasks;

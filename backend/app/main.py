@@ -34,7 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 
-APP_VERSION = "v0.3.0"
+APP_VERSION = "v0.4.0"
 DEFAULT_WORKSPACE_ID = "w1"
 DEFAULT_OWNER_ID = "adrian"
 SEED_PATH = Path(__file__).with_name("seed_state.json")
@@ -201,6 +201,22 @@ dashboards = Table(
     Column("is_private", Boolean, nullable=False, default=False),
     Column("favorite", Boolean, nullable=False, default=False),
     Column("config", JSON, nullable=False, default=dict),
+)
+
+report_cards = Table(
+    "report_cards",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("dashboard_id", String(64), ForeignKey("dashboards.id"), nullable=False),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("title", String(255), nullable=False),
+    Column("card_type", String(64), nullable=False, default="kpi"),
+    Column("metric", String(128), nullable=False, default="open_tasks"),
+    Column("filters", JSON, nullable=False, default=dict),
+    Column("layout", JSON, nullable=False, default=dict),
+    Column("config", JSON, nullable=False, default=dict),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
 forms = Table(
@@ -393,6 +409,23 @@ class CommentPayload(BaseModel):
     text: str
 
 
+class ReportActionPayload(BaseModel):
+    task_id: str
+    action: str
+    value: Optional[Any] = None
+    comment: Optional[str] = None
+
+
+class ReportCardPayload(BaseModel):
+    dashboard_id: str = "d1"
+    title: str
+    card_type: str = "kpi"
+    metric: str = "open_tasks"
+    filters: Dict[str, Any] = Field(default_factory=dict)
+    layout: Dict[str, Any] = Field(default_factory=dict)
+    config: Dict[str, Any] = Field(default_factory=dict)
+
+
 class IntakePayload(BaseModel):
     project_name: str
     requester: str = "Adrian Francis"
@@ -404,7 +437,7 @@ class IntakePayload(BaseModel):
 app = FastAPI(
     title="Thing Planner WorkOS API",
     version=APP_VERSION,
-    description="v0.3 normalized database, demo auth, audit logs, custom fields, and API foundation for Thing Planner WorkOS.",
+    description="v0.4 dashboard reporting engine, report cards, drill-down records, report actions, normalized data, and demo auth for Thing Planner WorkOS.",
 )
 
 app.add_middleware(
@@ -420,6 +453,7 @@ app.add_middleware(
 def startup() -> None:
     metadata.create_all(engine)
     ensure_seed_data()
+    ensure_default_report_cards()
 
 
 def get_current_user(authorization: Optional[str] = Header(default=None)) -> Optional[Dict[str, Any]]:
@@ -439,7 +473,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> Opt
 def load_seed_state() -> Dict[str, Any]:
     with SEED_PATH.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    data["version"] = "0.3.0"
+    data["version"] = "0.4.0"
     return data
 
 
@@ -519,8 +553,27 @@ def ensure_seed_data() -> None:
                 type=n.get("type", "info"), title=n.get("title", "Notification"), source=n.get("source", "System"),
                 read=bool(n.get("read", False)), tab=n.get("tab", "Primary"), created_at=utc_now(),
             ))
+        dashboard_ids: List[str] = []
         for d in state.get("dashboards", []):
-            conn.execute(dashboards.insert().values(id=d.get("id", make_id("d")), workspace_id=DEFAULT_WORKSPACE_ID, name=d.get("name", "Dashboard"), is_private=bool(d.get("private", False)), favorite=bool(d.get("favorite", False)), config={"cards": []}))
+            dashboard_id = d.get("id", make_id("d"))
+            dashboard_ids.append(dashboard_id)
+            conn.execute(dashboards.insert().values(id=dashboard_id, workspace_id=DEFAULT_WORKSPACE_ID, name=d.get("name", "Dashboard"), is_private=bool(d.get("private", False)), favorite=bool(d.get("favorite", False)), config={"cards": []}))
+        if dashboard_ids:
+            default_cards = [
+                ("rc_open", "Open Tasks", "kpi", "open_tasks", {}, {"x": 0, "y": 0, "w": 3, "h": 1}),
+                ("rc_blocked", "Blocked Work", "kpi", "blocked_tasks", {}, {"x": 3, "y": 0, "w": 3, "h": 1}),
+                ("rc_billable", "Billable Hours", "kpi", "billable_hours", {}, {"x": 6, "y": 0, "w": 3, "h": 1}),
+                ("rc_health", "Project Health", "ai", "project_health", {}, {"x": 9, "y": 0, "w": 3, "h": 1}),
+                ("rc_status", "Work by Status", "chart", "by_status", {}, {"x": 0, "y": 1, "w": 6, "h": 3}),
+                ("rc_assignee", "Team Productivity", "chart", "by_assignee", {}, {"x": 6, "y": 1, "w": 6, "h": 3}),
+                ("rc_tasks", "Actionable Work Table", "table", "task_table", {}, {"x": 0, "y": 4, "w": 12, "h": 4}),
+            ]
+            for cid, title, ctype, metric, filters, layout in default_cards:
+                conn.execute(report_cards.insert().values(
+                    id=cid, dashboard_id=dashboard_ids[0], workspace_id=DEFAULT_WORKSPACE_ID, title=title,
+                    card_type=ctype, metric=metric, filters=filters, layout=layout, config={},
+                    created_at=utc_now(), updated_at=utc_now(),
+                ))
         for form in state.get("forms", []):
             conn.execute(forms.insert().values(id=form.get("id", make_id("form")), workspace_id=DEFAULT_WORKSPACE_ID, name=form.get("name", "Form"), description=form.get("description", ""), submissions=int(form.get("submissions", 0)), favorite=bool(form.get("favorite", False)), schema={"fields": []}))
         for doc in state.get("docs", []):
@@ -530,7 +583,36 @@ def ensure_seed_data() -> None:
         for auto in state.get("automations", []):
             conn.execute(automations.insert().values(id=auto.get("id", make_id("a")), workspace_id=DEFAULT_WORKSPACE_ID, name=auto.get("name", "Automation"), category=auto.get("category", "Projects"), enabled=bool(auto.get("enabled", True)), trigger=auto.get("trigger", "Task updated"), action=auto.get("action", "Notify owner")))
         seed_custom_fields(conn)
-        log_event(conn, "seed", "workspace", DEFAULT_WORKSPACE_ID, "Seeded normalized v0.3.0 workspace", DEFAULT_OWNER_ID, {"version": APP_VERSION})
+        log_event(conn, "seed", "workspace", DEFAULT_WORKSPACE_ID, "Seeded normalized v0.4.0 reporting workspace", DEFAULT_OWNER_ID, {"version": APP_VERSION})
+
+
+def ensure_default_report_cards() -> None:
+    metadata.create_all(engine)
+    with engine.begin() as conn:
+        dashboard = conn.execute(select(dashboards.c.id).where(dashboards.c.workspace_id == DEFAULT_WORKSPACE_ID)).first()
+        if not dashboard:
+            conn.execute(dashboards.insert().values(id="d1", workspace_id=DEFAULT_WORKSPACE_ID, name="Executive PMO Dashboard", is_private=False, favorite=True, config={"cards": []}))
+            dashboard_id = "d1"
+        else:
+            dashboard_id = dashboard.id
+        existing_cards = conn.execute(select(func.count()).select_from(report_cards).where(report_cards.c.dashboard_id == dashboard_id)).scalar_one()
+        if existing_cards:
+            return
+        default_cards = [
+            ("rc_open", "Open Tasks", "kpi", "open_tasks", {}, {"x": 0, "y": 0, "w": 3, "h": 1}),
+            ("rc_blocked", "Blocked Work", "kpi", "blocked_tasks", {}, {"x": 3, "y": 0, "w": 3, "h": 1}),
+            ("rc_billable", "Billable Hours", "kpi", "billable_hours", {}, {"x": 6, "y": 0, "w": 3, "h": 1}),
+            ("rc_health", "Project Health", "ai", "project_health", {}, {"x": 9, "y": 0, "w": 3, "h": 1}),
+            ("rc_status", "Work by Status", "chart", "by_status", {}, {"x": 0, "y": 1, "w": 6, "h": 3}),
+            ("rc_assignee", "Team Productivity", "chart", "by_assignee", {}, {"x": 6, "y": 1, "w": 6, "h": 3}),
+            ("rc_tasks", "Actionable Work Table", "table", "task_table", {}, {"x": 0, "y": 4, "w": 12, "h": 4}),
+        ]
+        for cid, title, ctype, metric, filters, layout in default_cards:
+            conn.execute(report_cards.insert().values(
+                id=cid, dashboard_id=dashboard_id, workspace_id=DEFAULT_WORKSPACE_ID, title=title,
+                card_type=ctype, metric=metric, filters=filters, layout=layout, config={},
+                created_at=utc_now(), updated_at=utc_now(),
+            ))
 
 
 def default_permissions(role: str) -> List[str]:
@@ -643,7 +725,7 @@ def serialize_state() -> Dict[str, Any]:
         "selectedProject": "p1",
         "helper": True,
         "aiPromo": True,
-        "version": "0.3.0",
+        "version": "0.4.0",
         "workspace": {"name": workspace["name"], "initials": workspace["initials"]},
         "members": [
             {"id": r.id, "name": r.display_name, "initials": r.initials, "avatar": r.avatar, "role": r.role}
@@ -726,6 +808,7 @@ def health() -> Dict[str, Any]:
                 "comments": conn.execute(select(func.count()).select_from(task_comments)).scalar_one(),
                 "custom_fields": conn.execute(select(func.count()).select_from(custom_fields)).scalar_one(),
                 "activity_logs": conn.execute(select(func.count()).select_from(activity_logs)).scalar_one(),
+                "report_cards": conn.execute(select(func.count()).select_from(report_cards)).scalar_one(),
             }
         db_ok = True
     except SQLAlchemyError:
@@ -735,7 +818,7 @@ def health() -> Dict[str, Any]:
         "status": "ok" if db_ok else "degraded",
         "version": APP_VERSION,
         "database": engine.dialect.name,
-        "schema": "normalized",
+        "schema": "reporting-v0.4",
         "auth": "enabled",
         "workspace_id": DEFAULT_WORKSPACE_ID,
         "tables": table_counts,
@@ -777,9 +860,9 @@ def api_schema() -> Dict[str, Any]:
         "core_entities": [
             "users", "workspaces", "workspace_members", "spaces", "folders", "lists", "task_statuses", "tasks",
             "task_comments", "custom_fields", "custom_field_values", "notifications", "dashboards", "forms",
-            "docs", "goals", "automations", "activity_logs", "sessions",
+            "docs", "goals", "automations", "activity_logs", "sessions", "report_cards",
         ],
-        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1/v0.2 frontend state shape.",
+        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1-v0.4 frontend state shape. Reports now have derived dashboard endpoints and action APIs.",
     }
 
 
@@ -949,27 +1032,176 @@ def api_project_intake(payload: IntakePayload, current_user: Optional[Dict[str, 
     return {"ok": True, "task": task}
 
 
-@app.get("/api/reports/summary")
-def api_report_summary() -> Dict[str, Any]:
+
+
+def task_matches_filters(task: Dict[str, Any], filters: Dict[str, Any]) -> bool:
+    if not filters:
+        return True
+    if filters.get("projectId") and task.get("projectId") != filters["projectId"]:
+        return False
+    if filters.get("status") and task.get("status") != filters["status"]:
+        return False
+    if filters.get("assignee") and task.get("assignee") != filters["assignee"]:
+        return False
+    if filters.get("priority") and task.get("priority") != filters["priority"]:
+        return False
+    if filters.get("billable") is not None and bool(task.get("billable")) != bool(filters["billable"]):
+        return False
+    tag = filters.get("tag")
+    if tag and tag not in task.get("tags", []):
+        return False
+    return True
+
+
+def compute_report_dataset(filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     state = serialize_state()
-    task_list = state.get("tasks", [])
-    open_tasks = [t for t in task_list if t.get("status") != "DONE"]
-    blocked = [t for t in task_list if t.get("status") == "BLOCKED"]
-    billable_hours = sum(float(t.get("tracked") or 0) for t in task_list if t.get("billable"))
+    members_by_id = {m.get("id"): m for m in state.get("members", [])}
+    all_tasks = state.get("tasks", [])
+    filtered = [t for t in all_tasks if task_matches_filters(t, filters or {})]
+    done = [t for t in filtered if t.get("status") == "DONE"]
+    open_tasks = [t for t in filtered if t.get("status") != "DONE"]
+    blocked = [t for t in filtered if t.get("status") == "BLOCKED"]
+    tracked_hours = sum(float(t.get("tracked") or 0) for t in filtered)
+    billable_hours = sum(float(t.get("tracked") or 0) for t in filtered if t.get("billable"))
+    estimate_hours = sum(float(t.get("estimate") or 0) for t in filtered)
     by_status: Dict[str, int] = {}
-    by_assignee: Dict[str, int] = {}
-    for task in task_list:
-        by_status[task.get("status", "Unknown")] = by_status.get(task.get("status", "Unknown"), 0) + 1
-        by_assignee[task.get("assignee", "unassigned")] = by_assignee.get(task.get("assignee", "unassigned"), 0) + 1
+    by_assignee: Dict[str, Dict[str, Any]] = {}
+    by_priority: Dict[str, int] = {}
+    for task in filtered:
+        status_name = task.get("status", "Unknown")
+        by_status[status_name] = by_status.get(status_name, 0) + 1
+        priority = task.get("priority", "Normal")
+        by_priority[priority] = by_priority.get(priority, 0) + 1
+        assignee = task.get("assignee", "unassigned")
+        member = members_by_id.get(assignee, {"name": assignee, "initials": "?"})
+        bucket = by_assignee.setdefault(assignee, {"id": assignee, "name": member.get("name", assignee), "tasks": 0, "done": 0, "tracked": 0.0, "estimate": 0.0})
+        bucket["tasks"] += 1
+        bucket["tracked"] += float(task.get("tracked") or 0)
+        bucket["estimate"] += float(task.get("estimate") or 0)
+        if task.get("status") == "DONE":
+            bucket["done"] += 1
+    health = "At Risk" if blocked or len([t for t in open_tasks if t.get("critical")]) >= 2 else "On Track"
+    completion = round((len(done) / len(filtered)) * 100) if filtered else 0
+    utilization = round((tracked_hours / estimate_hours) * 100) if estimate_hours else 0
     return {
-        "total_tasks": len(task_list),
-        "open_tasks": len(open_tasks),
-        "blocked_tasks": len(blocked),
-        "billable_hours": billable_hours,
+        "schema": "reporting-v0.4",
+        "generated_at": utc_now().isoformat(),
+        "filters": filters or {},
+        "summary": {
+            "total_tasks": len(filtered),
+            "open_tasks": len(open_tasks),
+            "completed_tasks": len(done),
+            "blocked_tasks": len(blocked),
+            "billable_hours": round(billable_hours, 2),
+            "tracked_hours": round(tracked_hours, 2),
+            "estimate_hours": round(estimate_hours, 2),
+            "completion_pct": completion,
+            "utilization_pct": utilization,
+            "health": health,
+        },
         "by_status": by_status,
-        "by_assignee": by_assignee,
-        "schema": "normalized",
+        "by_assignee": list(by_assignee.values()),
+        "by_priority": by_priority,
+        "work_table": filtered,
+        "blockers": blocked,
+        "risks": [t for t in filtered if t.get("status") == "BLOCKED" or (t.get("critical") and t.get("status") != "DONE")],
+        "forms": state.get("forms", []),
+        "goals": state.get("goals", []),
     }
+
+@app.get("/api/reports/summary")
+def api_report_summary(projectId: Optional[str] = None, status_filter: Optional[str] = None, assignee: Optional[str] = None, tag: Optional[str] = None) -> Dict[str, Any]:
+    filters = {k: v for k, v in {"projectId": projectId, "status": status_filter, "assignee": assignee, "tag": tag}.items() if v}
+    return compute_report_dataset(filters)
+
+
+@app.get("/api/reports/dashboard")
+def api_report_dashboard(dashboard_id: str = "d1", projectId: Optional[str] = None) -> Dict[str, Any]:
+    filters = {"projectId": projectId} if projectId else {}
+    dataset = compute_report_dataset(filters)
+    with engine.begin() as conn:
+        dashboard = conn.execute(select(dashboards).where(dashboards.c.id == dashboard_id)).first()
+        card_rows = conn.execute(select(report_cards).where(report_cards.c.dashboard_id == dashboard_id).order_by(report_cards.c.created_at)).all()
+    cards = [dict(row._mapping) for row in card_rows]
+    return {
+        "dashboard": {"id": dashboard_id, "name": dashboard.name if dashboard else "Executive PMO Dashboard"},
+        "cards": cards,
+        "dataset": dataset,
+        "editable_actions": ["set_status", "assign", "set_due", "add_comment", "toggle_billable", "create_followup"],
+    }
+
+
+@app.get("/api/reports/drilldown")
+def api_report_drilldown(metric: str, projectId: Optional[str] = None) -> Dict[str, Any]:
+    filters = {"projectId": projectId} if projectId else {}
+    dataset = compute_report_dataset(filters)
+    tasks_for_metric = dataset["work_table"]
+    if metric == "open_tasks":
+        tasks_for_metric = [t for t in tasks_for_metric if t.get("status") != "DONE"]
+    elif metric == "blocked_tasks":
+        tasks_for_metric = [t for t in tasks_for_metric if t.get("status") == "BLOCKED"]
+    elif metric == "billable_hours":
+        tasks_for_metric = [t for t in tasks_for_metric if t.get("billable")]
+    elif metric.startswith("status:"):
+        target = metric.split(":", 1)[1]
+        tasks_for_metric = [t for t in tasks_for_metric if t.get("status") == target]
+    return {"metric": metric, "count": len(tasks_for_metric), "tasks": tasks_for_metric}
+
+
+@app.get("/api/reports/cards")
+def api_report_cards(dashboard_id: str = "d1") -> Dict[str, Any]:
+    with engine.begin() as conn:
+        rows = conn.execute(select(report_cards).where(report_cards.c.dashboard_id == dashboard_id).order_by(report_cards.c.created_at)).all()
+    return {"cards": [dict(row._mapping) for row in rows]}
+
+
+@app.post("/api/reports/cards")
+def api_create_report_card(payload: ReportCardPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    card = {
+        "id": make_id("rc"), "dashboard_id": payload.dashboard_id, "workspace_id": DEFAULT_WORKSPACE_ID,
+        "title": payload.title, "card_type": payload.card_type, "metric": payload.metric,
+        "filters": payload.filters, "layout": payload.layout, "config": payload.config,
+        "created_at": utc_now(), "updated_at": utc_now(),
+    }
+    with engine.begin() as conn:
+        conn.execute(report_cards.insert().values(**card))
+        log_event(conn, "report.card.created", "dashboard", payload.dashboard_id, f"Created report card: {payload.title}", actor, {"metric": payload.metric})
+    return {"ok": True, "card": {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in card.items()}}
+
+
+@app.post("/api/reports/actions")
+def api_report_action(payload: ReportActionPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        row = conn.execute(select(tasks).where(tasks.c.id == payload.task_id)).first()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Task {payload.task_id} not found")
+        if payload.action == "set_status":
+            values = {"status": str(payload.value), "updated_at": utc_now()}
+            if payload.value == "DONE":
+                values["progress"] = 100
+            conn.execute(tasks.update().where(tasks.c.id == payload.task_id).values(**values))
+        elif payload.action == "assign":
+            conn.execute(tasks.update().where(tasks.c.id == payload.task_id).values(assignee_id=str(payload.value), updated_at=utc_now()))
+        elif payload.action == "set_due":
+            conn.execute(tasks.update().where(tasks.c.id == payload.task_id).values(due=str(payload.value), updated_at=utc_now()))
+        elif payload.action == "toggle_billable":
+            conn.execute(tasks.update().where(tasks.c.id == payload.task_id).values(billable=not bool(row.billable), updated_at=utc_now()))
+        elif payload.action == "add_comment":
+            conn.execute(task_comments.insert().values(id=make_id("c"), task_id=payload.task_id, by_user_id=actor, by_name=current_user["display_name"] if current_user else "Report Action", text=payload.comment or str(payload.value or "Dashboard follow-up"), created_at=utc_now()))
+        elif payload.action == "create_followup":
+            followup = {
+                "id": make_id("t"), "projectId": row.list_id, "name": f"Follow up: {row.name}", "assignee": actor,
+                "due": row.due or "2026-07-15", "priority": "High", "status": "TO DO", "comments": [],
+                "estimate": 1, "tracked": 0, "billable": bool(row.billable), "tags": ["Follow-up", "Report"],
+                "progress": 0, "description": payload.comment or "Created from a report drill-down action.", "start": row.start or row.due or "2026-07-12", "duration": 1, "critical": False,
+            }
+            upsert_task_row(conn, followup, actor=actor, log=True)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported report action")
+        log_event(conn, "report.action", "task", payload.task_id, f"Dashboard action {payload.action} applied to task: {row.name}", actor, {"value": payload.value})
+    return {"ok": True, "state": serialize_state(), "dataset": compute_report_dataset()}
 
 
 @app.post("/api/ai/project-summary")
@@ -981,14 +1213,14 @@ def api_ai_summary() -> Dict[str, Any]:
     due_soon = [t for t in task_list if t.get("status") != "DONE"][:4]
     health = "At Risk" if blocked or len(critical_open) >= 2 else "On Track"
     return {
-        "summary": "The workspace is API-backed with normalized tasks, comments, custom fields, activity logs, and demo authentication. Watch blocked or critical-path work before expanding automations.",
+        "summary": "The workspace now includes a v0.4 reporting engine with server-side dashboard metrics, drill-down datasets, and report actions that update live work from dashboard cards.",
         "health": health,
         "blockers": [t.get("name") for t in blocked],
         "next_actions": [
             "Validate normalized table writes from List and Board views",
             "Move dashboard cards from derived frontend state to report endpoints",
             "Add real role enforcement for workspace members",
-            "Prepare v0.4 dashboard builder and custom report engine",
+            "Expand v0.5 forms and automations with report-triggered workflows",
         ],
         "sources": [t.get("name") for t in due_soon],
     }

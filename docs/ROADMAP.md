@@ -1,3 +1,5 @@
+> v0.4.0 update: dashboards now use a reporting engine with server-side datasets, report cards, drill-down records, and report actions. See `REPORTING_ENGINE_v0.4.0.md`.
+
 # Thing Planner WorkOS Roadmap
 > v0.3.0 update: the backend now uses normalized relational tables with demo authentication and /api/state compatibility serialization. See `DATABASE_SCHEMA_v0.3.0.md` and `AUTH_v0.3.0.md`.
 

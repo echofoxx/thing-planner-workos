@@ -4,7 +4,7 @@
   "selectedProject": "p1",
   "helper": true,
   "aiPromo": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "workspace": {
     "name": "Adrian Francis's Workspace",
     "initials": "A"
@@ -43,29 +43,29 @@
     {
       "id": "s1",
       "name": "Team Space",
-      "icon": "👥",
+      "icon": "\ud83d\udc65",
       "folders": [
         {
           "id": "f1",
           "name": "Projects",
-          "icon": "📁",
+          "icon": "\ud83d\udcc1",
           "lists": [
             {
               "id": "p1",
               "name": "Project 1",
-              "icon": "☑",
+              "icon": "\u2611",
               "kind": "project"
             },
             {
               "id": "p2",
               "name": "Project 2",
-              "icon": "☑",
+              "icon": "\u2611",
               "kind": "project"
             },
             {
               "id": "doc1",
               "name": "Project Notes",
-              "icon": "📄",
+              "icon": "\ud83d\udcc4",
               "kind": "doc"
             }
           ]
@@ -391,5 +391,50 @@
       "action": "Create deal and follow-up task"
     }
   ],
-  "aiMessages": []
+  "aiMessages": [],
+  "reportCards": [
+    {
+      "id": "rc1",
+      "title": "Open Tasks",
+      "type": "kpi",
+      "metric": "open_tasks"
+    },
+    {
+      "id": "rc2",
+      "title": "Blocked Work",
+      "type": "kpi",
+      "metric": "blocked_tasks"
+    },
+    {
+      "id": "rc3",
+      "title": "Billable Hours",
+      "type": "kpi",
+      "metric": "billable_hours"
+    },
+    {
+      "id": "rc4",
+      "title": "Project Health",
+      "type": "ai",
+      "metric": "health"
+    },
+    {
+      "id": "rc5",
+      "title": "Work by Status",
+      "type": "chart",
+      "metric": "by_status"
+    },
+    {
+      "id": "rc6",
+      "title": "Team Productivity",
+      "type": "chart",
+      "metric": "by_assignee"
+    },
+    {
+      "id": "rc7",
+      "title": "Actionable Work Table",
+      "type": "table",
+      "metric": "work_table"
+    }
+  ],
+  "reportFilter": "all"
 }

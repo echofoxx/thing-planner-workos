@@ -1,4 +1,4 @@
-# Publish v0.3.0 to GitHub
+# Publish v0.4.0 to GitHub
 
 Recommended repository:
 
@@ -9,17 +9,17 @@ https://github.com/echofoxx/thing-planner-workos
 ## New repository
 
 ```powershell
-cd C:\docker\thing-planner-workos-v0.3.0\thing-planner-workos-v0.3.0
+cd C:\docker\thing-planner-workos-v0.4.0\thing-planner-workos-v0.4.0
 
 git init
 git branch -M main
 git add .
-git commit -m "Release Thing Planner WorkOS v0.3.0"
+git commit -m "Release Thing Planner WorkOS v0.4.0"
 
 gh repo create echofoxx/thing-planner-workos --public --source . --remote origin --push
 
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 ## Existing repository
@@ -30,9 +30,9 @@ cd C:\docker\thing-planner-workos
 
 git status
 git add .
-git commit -m "Release v0.3.0 normalized data and auth foundation"
+git commit -m "Release v0.4.0 normalized data and auth foundation"
 git push origin main
 
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```

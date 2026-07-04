@@ -34,7 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 
-APP_VERSION = "v0.7.0"
+APP_VERSION = "v0.8.0"
 DEFAULT_WORKSPACE_ID = "w1"
 DEFAULT_OWNER_ID = "adrian"
 SEED_PATH = Path(__file__).with_name("seed_state.json")
@@ -258,6 +258,67 @@ docs = Table(
     Column("updated", String(64), nullable=False),
     Column("linked_tasks", Integer, nullable=False, default=0),
     Column("content", Text, nullable=False, default=""),
+)
+
+# v0.8 Docs + Knowledge / Wiki Engine tables
+doc_pages = Table(
+    "doc_pages",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("doc_id", String(64), ForeignKey("docs.id"), nullable=False),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("parent_page_id", String(64), ForeignKey("doc_pages.id"), nullable=True),
+    Column("title", String(255), nullable=False),
+    Column("page_type", String(64), nullable=False, default="page"),
+    Column("content", Text, nullable=False, default=""),
+    Column("sort_order", Integer, nullable=False, default=0),
+    Column("protected", Boolean, nullable=False, default=False),
+    Column("verified", Boolean, nullable=False, default=False),
+    Column("created_by", String(64), ForeignKey("users.id"), nullable=True),
+    Column("updated_by", String(64), ForeignKey("users.id"), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+doc_versions = Table(
+    "doc_versions",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("doc_id", String(64), ForeignKey("docs.id"), nullable=False),
+    Column("page_id", String(64), ForeignKey("doc_pages.id"), nullable=True),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("version_number", Integer, nullable=False, default=1),
+    Column("title", String(255), nullable=False),
+    Column("content", Text, nullable=False, default=""),
+    Column("created_by", String(64), ForeignKey("users.id"), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+doc_task_links = Table(
+    "doc_task_links",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("doc_id", String(64), ForeignKey("docs.id"), nullable=False),
+    Column("page_id", String(64), ForeignKey("doc_pages.id"), nullable=True),
+    Column("task_id", String(64), ForeignKey("tasks.id"), nullable=False),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("relation", String(64), nullable=False, default="references"),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("doc_id", "task_id", "relation", name="uq_doc_task_relation"),
+)
+
+doc_decisions = Table(
+    "doc_decisions",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("doc_id", String(64), ForeignKey("docs.id"), nullable=False),
+    Column("workspace_id", String(64), ForeignKey("workspaces.id"), nullable=False),
+    Column("title", String(500), nullable=False),
+    Column("decision", Text, nullable=False),
+    Column("rationale", Text, nullable=False, default=""),
+    Column("owner", String(255), nullable=False, default="Adrian Francis"),
+    Column("status", String(64), nullable=False, default="Accepted"),
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
 goals = Table(
@@ -642,10 +703,40 @@ class GanttBaselinePayload(BaseModel):
     name: str = "Baseline"
 
 
+class DocPayload(BaseModel):
+    title: str = "Untitled Doc"
+    kind: str = "Doc"
+    owner: str = "Adrian Francis"
+    content: str = ""
+    verified: bool = False
+    protected: bool = False
+
+
+class DocPatchPayload(BaseModel):
+    title: Optional[str] = None
+    kind: Optional[str] = None
+    content: Optional[str] = None
+    verified: Optional[bool] = None
+    protected: Optional[bool] = None
+
+
+class DocLinkPayload(BaseModel):
+    task_id: str
+    relation: str = "references"
+
+
+class DecisionPayload(BaseModel):
+    title: str = "Decision"
+    decision: str
+    rationale: str = ""
+    owner: str = "Adrian Francis"
+    status: str = "Accepted"
+
+
 app = FastAPI(
     title="Thing Planner WorkOS API",
     version=APP_VERSION,
-    description="v0.7 Gantt, dependencies, critical path, delay propagation, planner scheduling, reporting, forms, automations, normalized data, and demo auth for Thing Planner WorkOS.",
+    description="v0.8 Docs, Wiki, Knowledge, Decisions, linked tasks, AI document summaries, Gantt, planner, reporting, forms, automations, normalized data, and demo auth for Thing Planner WorkOS.",
 )
 
 app.add_middleware(
@@ -664,6 +755,7 @@ def startup() -> None:
     ensure_default_report_cards()
     ensure_default_planner_data()
     ensure_default_gantt_data()
+    ensure_default_docs_data()
 
 
 def get_current_user(authorization: Optional[str] = Header(default=None)) -> Optional[Dict[str, Any]]:
@@ -683,7 +775,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> Opt
 def load_seed_state() -> Dict[str, Any]:
     with SEED_PATH.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    data["version"] = "0.7.0"
+    data["version"] = "0.8.0"
     return data
 
 
@@ -834,8 +926,186 @@ def ensure_seed_data() -> None:
             if not exists:
                 conn.execute(automations.insert().values(workspace_id=DEFAULT_WORKSPACE_ID, enabled=True, **auto))
         seed_custom_fields(conn)
-        log_event(conn, "seed", "workspace", DEFAULT_WORKSPACE_ID, "Seeded normalized v0.7.0 Gantt dependency workspace", DEFAULT_OWNER_ID, {"version": APP_VERSION})
+        log_event(conn, "seed", "workspace", DEFAULT_WORKSPACE_ID, "Seeded normalized v0.8.0 Docs + Knowledge workspace", DEFAULT_OWNER_ID, {"version": APP_VERSION})
 
+
+def default_doc_content(title: str, kind: str) -> str:
+    if "Charter" in title:
+        return """# Project Charter
+
+## BLUF
+Thing Planner WorkOS is an AI-native project management command center that connects tasks, dashboards, forms, planner blocks, Gantt dependencies, and knowledge.
+
+## Outcomes
+- Deliver a production-demo workspace shell.
+- Keep every project artifact linked back to tasks.
+- Use AI summaries for executive updates and blockers.
+
+## Success Measures
+- Dashboard cards can update source work.
+- Intake submissions create traceable tasks.
+- Gantt dependencies flag schedule risk.
+"""
+    if "SOP" in title or "Wiki" in title:
+        return """# Team SOP Wiki
+
+## Standard workflow
+1. Capture requests through Forms.
+2. Convert approved requests into tasks and linked docs.
+3. Track delivery through List, Board, Calendar, Gantt, and Dashboard views.
+4. Review AI risk watch and update blocked tasks daily.
+
+## Working agreements
+- Every decision belongs in the Decision Log.
+- Every dashboard KPI should drill into source records.
+- Critical-path blockers must have an owner and due date.
+"""
+    if "Decision" in title:
+        return """# Decision Log
+
+## Decisions
+- Use PostgreSQL as the production data layer with SQLite fallback for demos.
+- Keep the UI ClickUp-inspired while using independent product identity and assets.
+- Prioritize actionable dashboards before advanced chat features.
+
+## Open items
+- Choose final product name.
+- Decide whether AI actions execute automatically or require approval.
+"""
+    return f"# {title}\n\nUse this doc to capture notes, decisions, context, and action items linked to your project work.\n"
+
+
+def ensure_default_docs_data() -> None:
+    """Create v0.8 wiki pages, versions, links, decisions, and doc automations if missing."""
+    metadata.create_all(engine)
+    with engine.begin() as conn:
+        doc_rows = conn.execute(select(docs).where(docs.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+        if not doc_rows:
+            defaults = [
+                ("doc1", "Project Charter", "Project Plan", "Adrian Francis"),
+                ("doc2", "Team SOP Wiki", "Wiki", "Mira Chen"),
+                ("doc3", "Decision Log", "Decisions", "Adrian Francis"),
+            ]
+            for doc_id, title, kind, owner in defaults:
+                conn.execute(docs.insert().values(
+                    id=doc_id, workspace_id=DEFAULT_WORKSPACE_ID, title=title, kind=kind, owner=owner,
+                    updated="Today", linked_tasks=0, content=default_doc_content(title, kind),
+                ))
+            doc_rows = conn.execute(select(docs).where(docs.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+
+        for row in doc_rows:
+            doc = row._mapping
+            content = doc.get("content") or default_doc_content(doc["title"], doc["kind"])
+            if not doc.get("content"):
+                conn.execute(docs.update().where(docs.c.id == doc["id"]).values(content=content, updated="Today"))
+            page_exists = conn.execute(select(doc_pages.c.id).where(doc_pages.c.doc_id == doc["id"])).first()
+            if not page_exists:
+                root_page_id = f"page_{doc['id']}_root"
+                conn.execute(doc_pages.insert().values(
+                    id=root_page_id, doc_id=doc["id"], workspace_id=DEFAULT_WORKSPACE_ID, parent_page_id=None,
+                    title=doc["title"], page_type="root", content=content, sort_order=0,
+                    protected=doc["kind"].lower() in ["wiki", "decisions"], verified=doc["kind"].lower() in ["wiki", "project plan"],
+                    created_by=DEFAULT_OWNER_ID, updated_by=DEFAULT_OWNER_ID, created_at=utc_now(), updated_at=utc_now(),
+                ))
+                conn.execute(doc_versions.insert().values(
+                    id=make_id("ver"), doc_id=doc["id"], page_id=root_page_id, workspace_id=DEFAULT_WORKSPACE_ID,
+                    version_number=1, title=doc["title"], content=content, created_by=DEFAULT_OWNER_ID, created_at=utc_now(),
+                ))
+
+        existing_links = conn.execute(select(func.count()).select_from(doc_task_links).where(doc_task_links.c.workspace_id == DEFAULT_WORKSPACE_ID)).scalar_one()
+        if existing_links == 0:
+            defaults = [("doc1", "t4", "governs"), ("doc1", "t5", "informs"), ("doc2", "t5", "procedure"), ("doc3", "t2", "decision-source")]
+            for doc_id, task_id, relation in defaults:
+                task_exists = conn.execute(select(tasks.c.id).where(tasks.c.id == task_id)).first()
+                doc_exists = conn.execute(select(docs.c.id).where(docs.c.id == doc_id)).first()
+                if task_exists and doc_exists:
+                    conn.execute(doc_task_links.insert().values(
+                        id=make_id("dtl"), doc_id=doc_id, page_id=f"page_{doc_id}_root", task_id=task_id,
+                        workspace_id=DEFAULT_WORKSPACE_ID, relation=relation, created_at=utc_now(),
+                    ))
+            update_doc_link_counts(conn)
+
+        existing_decisions = conn.execute(select(func.count()).select_from(doc_decisions).where(doc_decisions.c.workspace_id == DEFAULT_WORKSPACE_ID)).scalar_one()
+        if existing_decisions == 0:
+            decisions = [
+                ("Use actionable dashboards", "Dashboard cards must allow users to update source work without switching tools.", "This keeps reports operational instead of read-only."),
+                ("Keep traceable AI", "AI-generated summaries should cite source tasks, docs, and activity.", "Traceability improves trust and enables enterprise review."),
+                ("Prioritize Docs v0.8", "Docs, wiki pages, decisions, and task links become the knowledge layer for WorkOS.", "The next phase needs shared knowledge connected to execution."),
+            ]
+            for title, decision, rationale in decisions:
+                conn.execute(doc_decisions.insert().values(
+                    id=make_id("dec"), doc_id="doc3", workspace_id=DEFAULT_WORKSPACE_ID, title=title,
+                    decision=decision, rationale=rationale, owner="Adrian Francis", status="Accepted", created_at=utc_now(),
+                ))
+
+        for auto in [
+            {"id": "auto_doc_decision", "name": "Decision added to wiki", "category": "Knowledge", "trigger": "Decision captured", "action": "Link decision to source task and notify project owner"},
+            {"id": "auto_doc_ai_summary", "name": "AI summarize stale docs", "category": "AI & Automation", "trigger": "Doc updated", "action": "Generate AI summary, action items, and linked task recommendations"},
+        ]:
+            exists = conn.execute(select(automations.c.id).where(automations.c.id == auto["id"])).first()
+            if not exists:
+                conn.execute(automations.insert().values(workspace_id=DEFAULT_WORKSPACE_ID, enabled=True, **auto))
+
+
+def update_doc_link_counts(conn) -> None:
+    doc_rows = conn.execute(select(docs.c.id).where(docs.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+    for doc in doc_rows:
+        count = conn.execute(select(func.count()).select_from(doc_task_links).where(doc_task_links.c.doc_id == doc.id)).scalar_one()
+        conn.execute(docs.update().where(docs.c.id == doc.id).values(linked_tasks=int(count), updated="Today"))
+
+
+def markdown_excerpt(content: str, words: int = 26) -> str:
+    text = " ".join((content or "").replace("#", " ").replace("-", " ").split())
+    pieces = text.split()[:words]
+    return " ".join(pieces) + ("..." if len(text.split()) > words else "")
+
+
+def ai_doc_summary(doc: Dict[str, Any], linked_tasks: List[Dict[str, Any]], decisions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    content = doc.get("content") or ""
+    blocked = [t for t in linked_tasks if t.get("status") == "BLOCKED"]
+    action_items = []
+    if blocked:
+        action_items.append(f"Resolve blocker: {blocked[0]['name']}")
+    if "decision" in doc.get("kind", "").lower() or decisions:
+        action_items.append("Review open decisions and confirm owners before the next status report")
+    if not action_items:
+        action_items.append("Link this doc to at least one active task to keep knowledge connected to delivery")
+    return {
+        "title": doc.get("title"),
+        "summary": markdown_excerpt(content, 44) or f"{doc.get('title')} captures shared context for project execution.",
+        "linkedTaskCount": len(linked_tasks),
+        "decisionCount": len(decisions),
+        "risk": "medium" if blocked else "low",
+        "actionItems": action_items,
+        "sources": [t.get("name") for t in linked_tasks[:4]] + [d.get("title") for d in decisions[:2]],
+    }
+
+
+def serialize_doc_bundle(conn, doc_id: str) -> Dict[str, Any]:
+    doc_row = conn.execute(select(docs).where(docs.c.id == doc_id)).first()
+    if not doc_row:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    doc = dict(doc_row._mapping)
+    page_rows = conn.execute(select(doc_pages).where(doc_pages.c.doc_id == doc_id).order_by(doc_pages.c.sort_order, doc_pages.c.created_at)).all()
+    link_rows = conn.execute(select(doc_task_links, tasks.c.name, tasks.c.status, tasks.c.assignee_id, tasks.c.due).join(tasks, doc_task_links.c.task_id == tasks.c.id).where(doc_task_links.c.doc_id == doc_id)).all()
+    decision_rows = conn.execute(select(doc_decisions).where(doc_decisions.c.doc_id == doc_id).order_by(doc_decisions.c.created_at.desc())).all()
+    version_rows = conn.execute(select(doc_versions).where(doc_versions.c.doc_id == doc_id).order_by(doc_versions.c.version_number.desc()).limit(5)).all()
+    pages = [dict(r._mapping) for r in page_rows]
+    linked = []
+    for r in link_rows:
+        m = r._mapping
+        linked.append({"id": m["id"], "taskId": m["task_id"], "taskName": m["name"], "status": m["status"], "assignee": m["assignee_id"], "due": m["due"], "relation": m["relation"]})
+    decisions_list = [{"id": r.id, "title": r.title, "decision": r.decision, "rationale": r.rationale, "owner": r.owner, "status": r.status, "createdAt": r.created_at.isoformat()} for r in decision_rows]
+    content = doc.get("content") or (pages[0].get("content", "") if pages else "")
+    return {
+        "id": doc["id"], "title": doc["title"], "kind": doc["kind"], "owner": doc["owner"], "updated": doc["updated"],
+        "linkedTasks": doc["linked_tasks"], "content": content,
+        "pages": [{"id": p["id"], "title": p["title"], "pageType": p["page_type"], "content": p["content"], "protected": p["protected"], "verified": p["verified"], "updatedAt": p["updated_at"].isoformat()} for p in pages],
+        "linkedTaskRecords": linked,
+        "decisions": decisions_list,
+        "versions": [{"id": r.id, "versionNumber": r.version_number, "title": r.title, "createdAt": r.created_at.isoformat()} for r in version_rows],
+        "aiSummary": ai_doc_summary({**doc, "content": content}, [{"name": t["taskName"], "status": t["status"]} for t in linked], decisions_list),
+    }
 
 def ensure_default_planner_data() -> None:
     """Create planner preferences and demo meetings if they do not exist."""
@@ -997,11 +1267,24 @@ def serialize_state() -> Dict[str, Any]:
         dependency_rows = conn.execute(select(task_dependencies).where(task_dependencies.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
         baseline_rows = conn.execute(select(gantt_baselines).where(gantt_baselines.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(gantt_baselines.c.created_at.desc()).limit(10)).all()
         gantt_alert_rows = conn.execute(select(gantt_risk_alerts).where(gantt_risk_alerts.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(gantt_risk_alerts.c.created_at.desc()).limit(20)).all()
+        doc_page_rows = conn.execute(select(doc_pages).where(doc_pages.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(doc_pages.c.sort_order, doc_pages.c.created_at)).all()
+        doc_link_rows = conn.execute(select(doc_task_links).where(doc_task_links.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+        doc_decision_rows = conn.execute(select(doc_decisions).where(doc_decisions.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
 
     comments_by_task: Dict[str, List[Dict[str, Any]]] = {}
     for c in comment_rows:
         cm = c._mapping
         comments_by_task.setdefault(cm["task_id"], []).append({"by": cm["by_name"], "text": cm["text"], "created_at": cm["created_at"].isoformat()})
+
+    doc_pages_by_doc: Dict[str, List[Any]] = {}
+    for pr in doc_page_rows:
+        doc_pages_by_doc.setdefault(pr.doc_id, []).append(pr)
+    doc_links_by_doc: Dict[str, List[Any]] = {}
+    for lr in doc_link_rows:
+        doc_links_by_doc.setdefault(lr.doc_id, []).append(lr)
+    doc_decisions_by_doc: Dict[str, List[Any]] = {}
+    for dr in doc_decision_rows:
+        doc_decisions_by_doc.setdefault(dr.doc_id, []).append(dr)
 
     folders_by_space: Dict[str, List[Dict[str, Any]]] = {}
     for fr in folder_rows:
@@ -1020,7 +1303,7 @@ def serialize_state() -> Dict[str, Any]:
         "selectedProject": "p1",
         "helper": True,
         "aiPromo": True,
-        "version": "0.7.0",
+        "version": "0.8.0",
         "workspace": {"name": workspace["name"], "initials": workspace["initials"]},
         "members": [
             {"id": r.id, "name": r.display_name, "initials": r.initials, "avatar": r.avatar, "role": r.role}
@@ -1059,7 +1342,25 @@ def serialize_state() -> Dict[str, Any]:
         "dashboards": [{"id": r.id, "name": r.name, "private": r.is_private, "favorite": r.favorite} for r in dashboard_rows],
         "forms": [{"id": r.id, "name": r.name, "description": r.description, "submissions": r.submissions, "favorite": r.favorite, "schema": r.schema or {}} for r in form_rows],
         "formSubmissions": [{"id": r.id, "formId": r.form_id, "requester": r.requester, "department": r.department, "priority": r.priority, "payload": r.payload or {}, "aiAnalysis": r.ai_analysis or {}, "createdTaskId": r.created_task_id, "status": r.status, "createdAt": r.created_at.isoformat()} for r in form_submission_rows],
-        "docs": [{"id": r.id, "title": r.title, "kind": r.kind, "owner": r.owner, "updated": r.updated, "linkedTasks": r.linked_tasks} for r in doc_rows],
+        "docs": [{
+            "id": r.id,
+            "title": r.title,
+            "kind": r.kind,
+            "owner": r.owner,
+            "updated": r.updated,
+            "linkedTasks": r.linked_tasks,
+            "content": r.content or (doc_pages_by_doc.get(r.id, [None])[0].content if doc_pages_by_doc.get(r.id) else ""),
+            "pages": [{"id": p.id, "title": p.title, "pageType": p.page_type, "protected": p.protected, "verified": p.verified, "content": p.content} for p in doc_pages_by_doc.get(r.id, [])],
+            "decisionCount": len(doc_decisions_by_doc.get(r.id, [])),
+            "linkCount": len(doc_links_by_doc.get(r.id, [])),
+        } for r in doc_rows],
+        "knowledgeStats": {
+            "docs": len(doc_rows),
+            "pages": len(doc_page_rows),
+            "linkedTasks": len(doc_link_rows),
+            "decisions": len(doc_decision_rows),
+            "verifiedPages": sum(1 for p in doc_page_rows if p.verified),
+        },
         "goals": [{"id": r.id, "name": r.name, "owner": r.owner, "progress": r.progress, "status": r.status} for r in goal_rows],
         "automations": [{"id": r.id, "name": r.name, "category": r.category, "enabled": r.enabled, "trigger": r.trigger, "action": r.action} for r in automation_rows],
         "automationRuns": [{"id": r.id, "automationId": r.automation_id, "trigger": r.trigger, "sourceType": r.source_type, "sourceId": r.source_id, "status": r.status, "summary": r.summary, "details": r.details or {}, "createdAt": r.created_at.isoformat()} for r in automation_run_rows],
@@ -1120,6 +1421,10 @@ def health() -> Dict[str, Any]:
                 "task_dependencies": conn.execute(select(func.count()).select_from(task_dependencies)).scalar_one(),
                 "gantt_baselines": conn.execute(select(func.count()).select_from(gantt_baselines)).scalar_one(),
                 "gantt_risk_alerts": conn.execute(select(func.count()).select_from(gantt_risk_alerts)).scalar_one(),
+                "doc_pages": conn.execute(select(func.count()).select_from(doc_pages)).scalar_one(),
+                "doc_versions": conn.execute(select(func.count()).select_from(doc_versions)).scalar_one(),
+                "doc_task_links": conn.execute(select(func.count()).select_from(doc_task_links)).scalar_one(),
+                "doc_decisions": conn.execute(select(func.count()).select_from(doc_decisions)).scalar_one(),
             }
         db_ok = True
     except SQLAlchemyError:
@@ -1129,7 +1434,7 @@ def health() -> Dict[str, Any]:
         "status": "ok" if db_ok else "degraded",
         "version": APP_VERSION,
         "database": engine.dialect.name,
-        "schema": "gantt-dependency-v0.7",
+        "schema": "docs-knowledge-v0.8",
         "auth": "enabled",
         "workspace_id": DEFAULT_WORKSPACE_ID,
         "tables": table_counts,
@@ -1173,8 +1478,9 @@ def api_schema() -> Dict[str, Any]:
             "task_comments", "custom_fields", "custom_field_values", "notifications", "dashboards", "forms",
             "docs", "goals", "automations", "automation_runs", "activity_logs", "sessions", "report_cards", "form_submissions",
             "calendar_events", "planner_blocks", "planner_preferences", "task_dependencies", "gantt_baselines", "gantt_risk_alerts",
+            "doc_pages", "doc_versions", "doc_task_links", "doc_decisions",
         ],
-        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1-v0.7 frontend state shape. v0.7 adds Gantt/dependency/critical path endpoints, delay propagation, baselines, and schedule risk alerts on top of planner, reporting, forms, automations, and auth.",
+        "compatibility": "The /api/state endpoint serializes normalized tables into the v0.1-v0.8 frontend state shape. v0.8 adds Docs, wiki pages, decisions, linked task records, AI document summaries, and knowledge search on top of Gantt, planner, reporting, forms, automations, and auth.",
     }
 
 
@@ -1890,7 +2196,7 @@ def compute_report_dataset(filters: Optional[Dict[str, Any]] = None) -> Dict[str
     completion = round((len(done) / len(filtered)) * 100) if filtered else 0
     utilization = round((tracked_hours / estimate_hours) * 100) if estimate_hours else 0
     return {
-        "schema": "gantt-dependency-v0.7",
+        "schema": "docs-knowledge-v0.8",
         "generated_at": utc_now().isoformat(),
         "filters": filters or {},
         "summary": {
@@ -2075,7 +2381,7 @@ def ensure_default_gantt_data() -> None:
                 name="AI Gantt delay watch", category="Automate Scheduling", enabled=True,
                 trigger="Dependency or due date changes", action="Recalculate critical path, flag conflicts, and suggest schedule recovery",
             ))
-        for list_id, baseline_id in [("p1", "baseline_p1_v070"), ("p2", "baseline_p2_v070")]:
+        for list_id, baseline_id in [("p1", "baseline_p1_v080"), ("p2", "baseline_p2_v080")]:
             exists = conn.execute(select(gantt_baselines.c.id).where(gantt_baselines.c.id == baseline_id)).first()
             if not exists:
                 task_rows = conn.execute(select(tasks).where(tasks.c.list_id == list_id).order_by(tasks.c.start, tasks.c.due)).all()
@@ -2322,6 +2628,185 @@ def api_create_gantt_baseline(payload: GanttBaselinePayload, current_user: Optio
     return compute_gantt_dataset(payload.project_id, persist_alerts=True)
 
 
+@app.get("/api/docs")
+def api_docs() -> Dict[str, Any]:
+    ensure_default_docs_data()
+    with engine.begin() as conn:
+        rows = conn.execute(select(docs).where(docs.c.workspace_id == DEFAULT_WORKSPACE_ID).order_by(docs.c.title)).all()
+        bundles = [serialize_doc_bundle(conn, r.id) for r in rows]
+    return {
+        "ok": True,
+        "docs": bundles,
+        "stats": {
+            "docs": len(bundles),
+            "pages": sum(len(d.get("pages", [])) for d in bundles),
+            "linkedTasks": sum(len(d.get("linkedTaskRecords", [])) for d in bundles),
+            "decisions": sum(len(d.get("decisions", [])) for d in bundles),
+            "verifiedPages": sum(len([p for p in d.get("pages", []) if p.get("verified")]) for d in bundles),
+        },
+    }
+
+
+@app.get("/api/docs/{doc_id}")
+def api_get_doc(doc_id: str) -> Dict[str, Any]:
+    ensure_default_docs_data()
+    with engine.begin() as conn:
+        return {"ok": True, "doc": serialize_doc_bundle(conn, doc_id)}
+
+
+@app.post("/api/docs")
+def api_create_doc(payload: DocPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    doc_id = make_id("doc")
+    page_id = make_id("page")
+    content = payload.content or f"# {payload.title}\n\nCapture notes, decisions, context, and action items here. Link it to tasks to keep knowledge connected to delivery.\n"
+    with engine.begin() as conn:
+        conn.execute(docs.insert().values(
+            id=doc_id, workspace_id=DEFAULT_WORKSPACE_ID, title=payload.title, kind=payload.kind, owner=payload.owner,
+            updated="Today", linked_tasks=0, content=content,
+        ))
+        conn.execute(doc_pages.insert().values(
+            id=page_id, doc_id=doc_id, workspace_id=DEFAULT_WORKSPACE_ID, parent_page_id=None, title=payload.title,
+            page_type="root", content=content, sort_order=0, protected=payload.protected, verified=payload.verified,
+            created_by=actor, updated_by=actor, created_at=utc_now(), updated_at=utc_now(),
+        ))
+        conn.execute(doc_versions.insert().values(
+            id=make_id("ver"), doc_id=doc_id, page_id=page_id, workspace_id=DEFAULT_WORKSPACE_ID,
+            version_number=1, title=payload.title, content=content, created_by=actor, created_at=utc_now(),
+        ))
+        log_event(conn, "doc.created", "doc", doc_id, f"Created doc: {payload.title}", actor, {"kind": payload.kind})
+        bundle = serialize_doc_bundle(conn, doc_id)
+    return {"ok": True, "doc": bundle, "state": serialize_state()}
+
+
+@app.patch("/api/docs/{doc_id}")
+def api_update_doc(doc_id: str, payload: DocPatchPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        doc_row = conn.execute(select(docs).where(docs.c.id == doc_id)).first()
+        if not doc_row:
+            raise HTTPException(status_code=404, detail="Doc not found")
+        root_page = conn.execute(select(doc_pages).where(doc_pages.c.doc_id == doc_id).order_by(doc_pages.c.sort_order)).first()
+        values = {}
+        if payload.title is not None:
+            values["title"] = payload.title
+        if payload.kind is not None:
+            values["kind"] = payload.kind
+        if payload.content is not None:
+            values["content"] = payload.content
+        if values:
+            values["updated"] = "Today"
+            conn.execute(docs.update().where(docs.c.id == doc_id).values(**values))
+        if root_page and (payload.title is not None or payload.content is not None or payload.verified is not None or payload.protected is not None):
+            page_values = {"updated_by": actor, "updated_at": utc_now()}
+            if payload.title is not None:
+                page_values["title"] = payload.title
+            if payload.content is not None:
+                page_values["content"] = payload.content
+            if payload.verified is not None:
+                page_values["verified"] = payload.verified
+            if payload.protected is not None:
+                page_values["protected"] = payload.protected
+            conn.execute(doc_pages.update().where(doc_pages.c.id == root_page.id).values(**page_values))
+            latest_version = conn.execute(select(func.max(doc_versions.c.version_number)).where(doc_versions.c.doc_id == doc_id)).scalar() or 0
+            conn.execute(doc_versions.insert().values(
+                id=make_id("ver"), doc_id=doc_id, page_id=root_page.id, workspace_id=DEFAULT_WORKSPACE_ID,
+                version_number=int(latest_version) + 1, title=payload.title or doc_row.title,
+                content=payload.content if payload.content is not None else root_page.content, created_by=actor, created_at=utc_now(),
+            ))
+        log_event(conn, "doc.updated", "doc", doc_id, f"Updated doc: {payload.title or doc_row.title}", actor, {})
+        bundle = serialize_doc_bundle(conn, doc_id)
+    return {"ok": True, "doc": bundle, "state": serialize_state()}
+
+
+@app.post("/api/docs/{doc_id}/links")
+def api_link_doc_task(doc_id: str, payload: DocLinkPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        doc = conn.execute(select(docs).where(docs.c.id == doc_id)).first()
+        task = conn.execute(select(tasks).where(tasks.c.id == payload.task_id)).first()
+        if not doc or not task:
+            raise HTTPException(status_code=404, detail="Doc or task not found")
+        exists = conn.execute(select(doc_task_links).where(doc_task_links.c.doc_id == doc_id).where(doc_task_links.c.task_id == payload.task_id).where(doc_task_links.c.relation == payload.relation)).first()
+        if not exists:
+            page = conn.execute(select(doc_pages.c.id).where(doc_pages.c.doc_id == doc_id).order_by(doc_pages.c.sort_order)).first()
+            conn.execute(doc_task_links.insert().values(
+                id=make_id("dtl"), doc_id=doc_id, page_id=page.id if page else None, task_id=payload.task_id,
+                workspace_id=DEFAULT_WORKSPACE_ID, relation=payload.relation, created_at=utc_now(),
+            ))
+            update_doc_link_counts(conn)
+            log_event(conn, "doc.task.linked", "doc", doc_id, f"Linked doc to task: {task.name}", actor, {"task_id": payload.task_id, "relation": payload.relation})
+        bundle = serialize_doc_bundle(conn, doc_id)
+    return {"ok": True, "doc": bundle, "state": serialize_state()}
+
+
+@app.post("/api/docs/{doc_id}/decisions")
+def api_add_decision(doc_id: str, payload: DecisionPayload, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
+    actor = current_user["id"] if current_user else DEFAULT_OWNER_ID
+    with engine.begin() as conn:
+        doc = conn.execute(select(docs).where(docs.c.id == doc_id)).first()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Doc not found")
+        decision_id = make_id("dec")
+        conn.execute(doc_decisions.insert().values(
+            id=decision_id, doc_id=doc_id, workspace_id=DEFAULT_WORKSPACE_ID, title=payload.title, decision=payload.decision,
+            rationale=payload.rationale, owner=payload.owner, status=payload.status, created_at=utc_now(),
+        ))
+        record_automation_run(conn, "auto_doc_decision", "Decision captured", "doc", doc_id, f"Captured decision: {payload.title}", {"decision_id": decision_id})
+        log_event(conn, "doc.decision.created", "doc_decision", decision_id, f"Captured decision: {payload.title}", actor, {"doc_id": doc_id})
+        bundle = serialize_doc_bundle(conn, doc_id)
+    return {"ok": True, "doc": bundle, "state": serialize_state()}
+
+
+@app.post("/api/docs/{doc_id}/ai-summary")
+def api_doc_ai_summary(doc_id: str) -> Dict[str, Any]:
+    ensure_default_docs_data()
+    with engine.begin() as conn:
+        bundle = serialize_doc_bundle(conn, doc_id)
+        summary = bundle.get("aiSummary", {})
+        record_automation_run(conn, "auto_doc_ai_summary", "Doc AI summary requested", "doc", doc_id, f"Generated AI summary for {bundle.get('title')}", {"risk": summary.get("risk"), "linked_tasks": summary.get("linkedTaskCount")})
+    return {"ok": True, "summary": summary, "doc": bundle}
+
+
+@app.get("/api/knowledge/search")
+def api_knowledge_search(q: str = "", kind: str = "all") -> Dict[str, Any]:
+    ensure_default_docs_data()
+    query = q.strip().lower()
+    results = []
+    with engine.begin() as conn:
+        rows = conn.execute(select(docs).where(docs.c.workspace_id == DEFAULT_WORKSPACE_ID)).all()
+        for r in rows:
+            bundle = serialize_doc_bundle(conn, r.id)
+            haystack = " ".join([bundle.get("title", ""), bundle.get("kind", ""), bundle.get("content", ""), " ".join(d.get("title", "") + " " + d.get("decision", "") for d in bundle.get("decisions", []))]).lower()
+            if kind != "all" and bundle.get("kind", "").lower() != kind.lower():
+                continue
+            if not query or query in haystack:
+                results.append({
+                    "id": bundle["id"], "title": bundle["title"], "kind": bundle["kind"], "owner": bundle["owner"],
+                    "excerpt": markdown_excerpt(bundle.get("content", ""), 34),
+                    "linkedTasks": len(bundle.get("linkedTaskRecords", [])), "decisions": len(bundle.get("decisions", [])),
+                    "score": 1.0 if query and query in bundle.get("title", "").lower() else 0.72,
+                })
+    return {"ok": True, "query": q, "results": results, "count": len(results)}
+
+
+@app.get("/api/knowledge/hub")
+def api_knowledge_hub() -> Dict[str, Any]:
+    ensure_default_docs_data()
+    docs_payload = api_docs()
+    return {
+        "ok": True,
+        "stats": docs_payload["stats"],
+        "recent": docs_payload["docs"][:5],
+        "decisions": [d for doc in docs_payload["docs"] for d in doc.get("decisions", [])][:10],
+        "recommendations": [
+            "Link every project doc to at least one active task.",
+            "Capture decisions as structured records so dashboards and AI can reference them.",
+            "Use protected wiki pages for SOPs and verified knowledge articles.",
+        ],
+    }
+
+
 @app.post("/api/ai/project-summary")
 def api_ai_summary() -> Dict[str, Any]:
     state = serialize_state()
@@ -2331,14 +2816,14 @@ def api_ai_summary() -> Dict[str, Any]:
     due_soon = [t for t in task_list if t.get("status") != "DONE"][:4]
     health = "At Risk" if blocked or len(critical_open) >= 2 else "On Track"
     return {
-        "summary": "The workspace now includes a v0.7 Gantt dependency engine with critical path detection, delay propagation, baselines, schedule risk alerts, and dependency-aware work planning.",
+        "summary": "The workspace now includes a v0.8 Docs + Knowledge engine with wiki pages, version history, decision records, task-linked knowledge, and AI document summaries on top of the existing Gantt, planner, reporting, forms, automations, and normalized data layer.",
         "health": health,
         "blockers": [t.get("name") for t in blocked],
         "next_actions": [
             "Validate normalized table writes from List and Board views",
             "Move dashboard cards from derived frontend state to report endpoints",
             "Add real role enforcement for workspace members",
-            "Use v0.7 Gantt critical path findings to reschedule dependent work",
+            "Use v0.8 Docs AI summaries to brief decisions, SOP updates, and linked project risks",
         ],
         "sources": [t.get("name") for t in due_soon],
     }

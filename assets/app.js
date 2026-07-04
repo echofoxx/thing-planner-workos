@@ -1,7 +1,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const STORAGE_KEY = 'thing-planner-workos-v070-state';
+const STORAGE_KEY = 'thing-planner-workos-v080-state';
 const API_BASE = window.THING_PLANNER_API_BASE || '/api';
 let apiOnline = false;
 let apiStatusText = 'Local demo mode';
@@ -9,7 +9,7 @@ let hasBootstrappedApi = false;
 let suppressApiSync = false;
 let syncTimer = null;
 let lastSyncAt = null;
-let authToken = localStorage.getItem('thing-planner-workos-v070-token') || null;
+let authToken = localStorage.getItem('thing-planner-workos-v080-token') || null;
 let currentUser = null;
 let authStatusText = 'Demo auth pending';
 let lastReportDataset = null;
@@ -21,9 +21,11 @@ const seedState = {
   module: 'home',
   view: 'list',
   selectedProject: 'p1',
+  selectedDoc: 'doc1',
+  knowledgeQuery: '',
   helper: true,
   aiPromo: true,
-  version: '0.7.0',
+  version: '0.8.0',
   workspace: {
     name: "Adrian Francis's Workspace",
     initials: 'A',
@@ -90,10 +92,11 @@ const seedState = {
     { id:'sub-demo-2', formId:'form1', requester:'Mira Chen', department:'Operations', priority:'Normal', payload:{project_name:'Weekly report automation'}, aiAnalysis:{classification:'Project Intake', risk:'low', recommended_owner:'mira', duplicate_risk:'low'}, createdTaskId:'t5', status:'Processed', createdAt:'2026-07-04T10:00:00Z' },
   ],
   docs: [
-    { id: 'doc1', title: 'Project Charter', kind: 'Project Plan', owner: 'Adrian Francis', updated: 'Today', linkedTasks: 4 },
-    { id: 'doc2', title: 'Team SOP Wiki', kind: 'Wiki', owner: 'Mira Chen', updated: 'Yesterday', linkedTasks: 2 },
-    { id: 'doc3', title: 'Decision Log', kind: 'Decisions', owner: 'Adrian Francis', updated: '2 days ago', linkedTasks: 6 },
+    { id: 'doc1', title: 'Project Charter', kind: 'Project Plan', owner: 'Adrian Francis', updated: 'Today', linkedTasks: 4, decisionCount: 1, content: '# Project Charter\n\n## BLUF\nThing Planner WorkOS is an AI-native command center connecting tasks, dashboards, forms, planner blocks, Gantt dependencies, and knowledge.\n\n## Outcomes\n- Deliver a production-demo workspace shell.\n- Keep project artifacts linked back to tasks.\n- Use AI summaries for executive updates and blockers.' },
+    { id: 'doc2', title: 'Team SOP Wiki', kind: 'Wiki', owner: 'Mira Chen', updated: 'Yesterday', linkedTasks: 2, decisionCount: 0, content: '# Team SOP Wiki\n\n## Standard workflow\n1. Capture requests through Forms.\n2. Convert approved requests into tasks and linked docs.\n3. Track delivery through List, Board, Calendar, Gantt, and Dashboard views.\n4. Review AI risk watch and update blocked tasks daily.' },
+    { id: 'doc3', title: 'Decision Log', kind: 'Decisions', owner: 'Adrian Francis', updated: '2 days ago', linkedTasks: 6, decisionCount: 3, content: '# Decision Log\n\n## Decisions\n- Use PostgreSQL as the production data layer with SQLite fallback for demos.\n- Keep the UI ClickUp-inspired while using independent product identity and assets.\n- Prioritize actionable dashboards before advanced chat features.' },
   ],
+  knowledgeStats: { docs: 3, pages: 3, linkedTasks: 12, decisions: 4, verifiedPages: 2 },
   goals: [
     { id: 'g1', name: 'Launch production-ready PM demo', owner: 'Adrian Francis', progress: 42, status: 'At Risk' },
     { id: 'g2', name: 'Reduce project handoff cycle time', owner: 'Mira Chen', progress: 68, status: 'On Track' },
@@ -189,7 +192,7 @@ async function ensureDemoAuth() {
       const data = await response.json();
       authToken = data.token;
       currentUser = data.user;
-      localStorage.setItem('thing-planner-workos-v070-token', authToken);
+      localStorage.setItem('thing-planner-workos-v080-token', authToken);
       authStatusText = `Demo auth: ${currentUser.display_name || currentUser.email}`;
     }
   } catch (error) {
@@ -207,7 +210,7 @@ async function hydrateFromApi() {
     if (!response.ok) throw new Error('State fetch failed');
     const data = await response.json();
     apiOnline = true;
-    apiStatusText = `${healthJson.version || 'v0.6.0'} ${healthJson.schema || 'API'} connected`;
+    apiStatusText = `${healthJson.version || 'v0.8.0'} ${healthJson.schema || 'API'} connected`;
     await ensureDemoAuth();
     hasBootstrappedApi = true;
     if (data && data.state) {
@@ -323,7 +326,7 @@ function renderTopbar() {
       </button>
       <button class="top-icon" onclick="setModule('planner')">▣</button>
       <button class="top-icon" onclick="toast('No workspace warnings today')">⚠</button>
-      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.7 Gantt/planner/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
+      <span class="api-status-badge ${apiOnline ? 'online' : 'offline'}" title="v0.8 Docs/knowledge/data/auth status">${apiStatusText}</span><span class="api-status-badge ${currentUser ? 'online' : 'offline'}" title="Demo authentication">${currentUser ? (currentUser.initials || 'AF') + ' Auth' : authStatusText}</span>
     </div>
     <div class="global-search-wrap">
       <label class="global-search"><span>⌕</span><input id="globalSearch" placeholder="Search ⌘K" onkeydown="if(event.key==='Enter') globalSearch(this.value)" /></label>
@@ -496,7 +499,7 @@ function renderTeamsSidebar() {
 }
 
 function renderDocsSidebar() {
-  return baseSidebar('Docs', "toast('New Doc')", `
+  return baseSidebar('Docs', "createDocFromTemplate()", `
     <div class="side-nav">
       <div class="side-item active"><span>▤</span><span>All Docs</span></div>
       <div class="side-item"><span>📘</span><span>Wikis</span></div>
@@ -1175,9 +1178,111 @@ function renderTeamsMain() {
 }
 
 function renderDocsMain() {
-  return `<div class="content"><div class="section-title"><div><h2>Docs, Wikis, Notes, and Decisions</h2><p style="margin:4px 0 0;color:var(--muted)">Shared knowledge connected to tasks, dashboards, goals, and AI.</p></div><button class="btn-primary" onclick="toast('New doc placeholder')">＋ New Doc</button></div>
-    <div class="doc-grid">${state.docs.map(d => `<div class="doc-card"><span class="badge">${d.kind}</span><h3>${escapeHtml(d.title)}</h3><p>Owner: ${d.owner}<br/>Updated: ${d.updated}<br/>Linked tasks: ${d.linkedTasks}</p><button class="btn-secondary" onclick="toast('Doc editor placeholder')">Open</button> <button class="btn-primary" onclick="runAISuggest('Summarize ${escapeHtml(d.title)}')">AI Summarize</button></div>`).join('')}</div>
+  ensureDocsState();
+  const doc = selectedDoc();
+  const stats = state.knowledgeStats || computeKnowledgeStatsLocal();
+  const query = (state.knowledgeQuery || '').toLowerCase();
+  const docs = state.docs.filter(d => !query || [d.title,d.kind,d.owner,d.content].join(' ').toLowerCase().includes(query));
+  return `<div class="content wide"><div class="section-title"><div><h2>Docs, Wikis, Notes, and Decisions</h2><p style="margin:4px 0 0;color:var(--muted)">Shared knowledge connected to tasks, dashboards, goals, and AI.</p></div><div class="project-actions"><button class="btn-secondary" onclick="refreshDocsFromApi()">⟳ Refresh</button><button class="btn-secondary" onclick="createDecisionDemo()">＋ Decision</button><button class="btn-primary" onclick="createDocFromTemplate()">＋ New Doc</button></div></div>
+    <div class="cards-grid compact">
+      <div class="kpi-card"><span class="badge green">v0.8</span><h3>Knowledge docs</h3><div class="value">${stats.docs}</div><div class="trend">Docs, wikis, notes, and project plans</div></div>
+      <div class="kpi-card"><span class="badge purple">Pages</span><h3>Wiki pages</h3><div class="value">${stats.pages}</div><div class="trend">${stats.verifiedPages || 0} verified/protected pages</div></div>
+      <div class="kpi-card"><span class="badge blue">Traceability</span><h3>Linked tasks</h3><div class="value">${stats.linkedTasks}</div><div class="trend">Knowledge tied to execution</div></div>
+      <div class="kpi-card"><span class="badge warn">Decisions</span><h3>Decision records</h3><div class="value">${stats.decisions}</div><div class="trend">Structured choices with rationale</div></div>
+    </div>
+    <div class="doc-workbench">
+      <div class="doc-list-panel">
+        <label class="search-lite"><span>⌕</span><input value="${escapeHtml(state.knowledgeQuery || '')}" placeholder="Search docs, decisions, SOPs..." oninput="setKnowledgeQuery(this.value)" /></label>
+        <div class="doc-list">${docs.map(d => renderDocListItem(d)).join('') || `<div class="empty-small">No docs matched that search.</div>`}</div>
+      </div>
+      <div class="doc-editor-panel">
+        ${doc ? renderDocEditor(doc) : `<div class="empty-center"><div class="big-icon">▤</div><h2>Select or create a doc</h2><p>Docs, wiki pages, and decisions stay linked to project work.</p></div>`}
+      </div>
+      <div class="doc-insights-panel">
+        ${doc ? renderDocInsights(doc) : ''}
+      </div>
+    </div>
   </div>`;
+}
+
+function ensureDocsState(){
+  state.docs = state.docs || [];
+  if(!state.selectedDoc && state.docs[0]) state.selectedDoc = state.docs[0].id;
+  state.knowledgeStats = state.knowledgeStats || computeKnowledgeStatsLocal();
+}
+function selectedDoc(){ ensureDocsState(); return state.docs.find(d=>d.id===state.selectedDoc) || state.docs[0]; }
+function computeKnowledgeStatsLocal(){
+  const docs = state.docs || [];
+  return { docs: docs.length, pages: docs.reduce((s,d)=>s+(d.pages?.length || 1),0), linkedTasks: docs.reduce((s,d)=>s+(d.linkedTasks || d.linkCount || 0),0), decisions: docs.reduce((s,d)=>s+(d.decisionCount || d.decisions?.length || 0),0), verifiedPages: docs.reduce((s,d)=>s+(d.pages||[]).filter(p=>p.verified).length,0) };
+}
+function renderDocListItem(d){
+  return `<button class="doc-list-item ${state.selectedDoc===d.id?'active':''}" onclick="openDoc('${d.id}')"><span class="badge ${d.kind==='Wiki'?'green':d.kind==='Decisions'?'warn':'blue'}">${escapeHtml(d.kind)}</span><b>${escapeHtml(d.title)}</b><span>${escapeHtml(d.owner)} • ${d.linkedTasks || d.linkCount || 0} linked tasks • ${d.decisionCount || d.decisions?.length || 0} decisions</span></button>`;
+}
+function renderDocEditor(doc){
+  const pages = doc.pages || [{title:doc.title, content:doc.content || ''}];
+  const content = doc.content || pages[0]?.content || '';
+  return `<div class="doc-editor-head"><div><span class="badge ${doc.kind==='Wiki'?'green':doc.kind==='Decisions'?'warn':'blue'}">${escapeHtml(doc.kind)}</span><h2>${escapeHtml(doc.title)}</h2><p>Owner: ${escapeHtml(doc.owner)} • Updated ${escapeHtml(doc.updated || 'Today')}</p></div><div class="project-actions"><button class="btn-secondary" onclick="linkDocToTopTask()">Link top task</button><button class="btn-secondary" onclick="saveSelectedDoc()">Save</button><button class="btn-primary" onclick="summarizeSelectedDoc()">✽ AI Summary</button></div></div>
+    <div class="doc-page-tabs">${pages.map((p,i)=>`<span class="doc-page-tab ${i===0?'active':''}">${p.verified?'✓ ':''}${escapeHtml(p.title || doc.title)}</span>`).join('')}<span class="doc-page-tab muted">＋ Page</span></div>
+    <textarea id="docContent" class="doc-editor" oninput="draftDocContent(this.value)">${escapeHtml(content)}</textarea>`;
+}
+function renderDocInsights(doc){
+  const linked = doc.linkedTaskRecords || linkRecordsForDocLocal(doc);
+  const summary = doc.aiSummary || makeDocSummaryLocal(doc);
+  const decisions = doc.decisions || [];
+  return `<div class="insight-card ai"><h3>✽ AI document brief</h3><p>${escapeHtml(summary.summary || 'This document captures shared project knowledge.')}</p><div class="mini-list">${(summary.actionItems || ['Link this doc to active work']).map(i=>`<div>• ${escapeHtml(i)}</div>`).join('')}</div><button class="btn-primary btn-small" onclick="summarizeSelectedDoc()">Refresh AI brief</button></div>
+    <div class="insight-card"><h3>Linked tasks</h3>${linked.slice(0,5).map(l=>`<div class="linked-row"><b>${escapeHtml(l.taskName || l.name)}</b><span>${escapeHtml(l.status || '')}</span></div>`).join('') || '<p class="muted">No tasks linked yet.</p>'}<button class="btn-secondary btn-small" onclick="linkDocToTopTask()">Link recommended task</button></div>
+    <div class="insight-card"><h3>Decisions</h3>${decisions.slice(0,4).map(d=>`<div class="decision-row"><b>${escapeHtml(d.title)}</b><span>${escapeHtml(d.status || 'Accepted')}</span></div>`).join('') || '<p class="muted">No structured decisions yet.</p>'}<button class="btn-secondary btn-small" onclick="createDecisionDemo()">Capture decision</button></div>
+    <div class="insight-card"><h3>Version history</h3>${(doc.versions || [{versionNumber:1,createdAt:'local'}]).slice(0,4).map(v=>`<div class="linked-row"><span>v${v.versionNumber || 1}</span><span>${dateShort(v.createdAt || 'Today')}</span></div>`).join('')}</div>`;
+}
+function setKnowledgeQuery(value){ state.knowledgeQuery = value; render(); }
+function openDoc(id){ state.selectedDoc = id; render(); if(apiOnline) fetchDocDetail(id); }
+function draftDocContent(value){ const doc=selectedDoc(); if(doc){ doc.content=value; doc.updated='Draft'; saveState(); } }
+function linkRecordsForDocLocal(doc){
+  const names = (doc.content || '').toLowerCase();
+  return state.tasks.filter(t => (t.tags||[]).some(tag=>names.includes(String(tag).toLowerCase())) || names.includes(t.name.toLowerCase().split(' ')[0])).slice(0,4).map(t=>({taskId:t.id,taskName:t.name,status:t.status,assignee:t.assignee,due:t.due,relation:'inferred'}));
+}
+function makeDocSummaryLocal(doc){
+  const linked = linkRecordsForDocLocal(doc);
+  const content = (doc.content || '').replace(/[#*-]/g,' ').replace(/\s+/g,' ').trim();
+  return { summary: content.slice(0,220) || `${doc.title} is ready for project notes, decisions, and linked task context.`, linkedTaskCount: linked.length, decisionCount: doc.decisionCount || 0, risk: linked.some(l=>l.status==='BLOCKED')?'medium':'low', actionItems: linked.some(l=>l.status==='BLOCKED') ? ['Resolve linked blocked task before next status update'] : ['Add at least one linked task or decision before publishing'] };
+}
+async function fetchDocDetail(id){
+  try{ const res=await fetch(`${API_BASE}/docs/${id}`, {headers:authHeaders(), cache:'no-store'}); if(res.ok){ const data=await res.json(); if(data.doc){ upsertDocLocal(data.doc); saveState(); render(); } } }catch(e){ console.warn(e); }
+}
+function upsertDocLocal(doc){ const idx=state.docs.findIndex(d=>d.id===doc.id); if(idx>=0) state.docs[idx]=doc; else state.docs.unshift(doc); state.knowledgeStats=computeKnowledgeStatsLocal(); }
+async function refreshDocsFromApi(){
+  ensureDocsState();
+  if(!apiOnline){ toast('Knowledge hub running locally'); render(); return; }
+  try{ const res=await fetch(`${API_BASE}/docs`, {headers:authHeaders(), cache:'no-store'}); if(!res.ok) throw new Error('Docs API failed'); const data=await res.json(); state.docs=data.docs || state.docs; state.knowledgeStats=data.stats || computeKnowledgeStatsLocal(); if(!state.selectedDoc && state.docs[0]) state.selectedDoc=state.docs[0].id; toast('Docs refreshed from API'); saveState(); render(); }catch(e){ console.warn(e); toast('Docs API unavailable; using local knowledge'); }
+}
+async function saveSelectedDoc(){
+  const doc=selectedDoc(); if(!doc) return; const content=$('#docContent')?.value || doc.content || ''; doc.content=content; doc.updated='Today';
+  if(apiOnline){ try{ const res=await fetch(`${API_BASE}/docs/${doc.id}`, {method:'PATCH', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify({title:doc.title, kind:doc.kind, content})}); if(res.ok){ const data=await res.json(); if(data.doc) upsertDocLocal(data.doc); toast('Doc saved to API'); saveState(); render(); return; }}catch(e){ console.warn(e); }}
+  toast('Doc saved locally'); saveState(); render();
+}
+async function createDocFromTemplate(){
+  const payload={title:'New Project Notes', kind:'Doc', owner:'Adrian Francis', content:'# New Project Notes\n\n## Context\n\n## Decisions\n\n## Action Items\n- '};
+  if(apiOnline){ try{ const res=await fetch(`${API_BASE}/docs`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify(payload)}); if(res.ok){ const data=await res.json(); upsertDocLocal(data.doc); state.selectedDoc=data.doc.id; toast('Doc created'); saveState(); render(); return; }}catch(e){ console.warn(e); }}
+  const doc={id:uid(), ...payload, updated:'Today', linkedTasks:0, decisionCount:0, pages:[{id:uid(),title:payload.title,content:payload.content,verified:false,protected:false}], versions:[{versionNumber:1,createdAt:new Date().toISOString()}]}; state.docs.unshift(doc); state.selectedDoc=doc.id; state.knowledgeStats=computeKnowledgeStatsLocal(); toast('Doc created locally'); saveState(); render();
+}
+async function summarizeSelectedDoc(){
+  const doc=selectedDoc(); if(!doc) return;
+  if(apiOnline){ try{ const res=await fetch(`${API_BASE}/docs/${doc.id}/ai-summary`, {method:'POST', headers:authHeaders()}); if(res.ok){ const data=await res.json(); if(data.doc) upsertDocLocal(data.doc); const msg=data.summary?.summary || 'AI summary generated'; toast('AI summary generated'); showModal('AI Document Summary', `<p>${escapeHtml(msg)}</p><ul>${(data.summary?.actionItems||[]).map(i=>`<li>${escapeHtml(i)}</li>`).join('')}</ul>`); render(); return; }}catch(e){ console.warn(e); }}
+  doc.aiSummary=makeDocSummaryLocal(doc); showModal('AI Document Summary', `<p>${escapeHtml(doc.aiSummary.summary)}</p><ul>${doc.aiSummary.actionItems.map(i=>`<li>${escapeHtml(i)}</li>`).join('')}</ul>`); toast('AI summary generated locally'); render();
+}
+async function linkDocToTopTask(){
+  const doc=selectedDoc(); const task=state.tasks.find(t=>t.status==='BLOCKED') || state.tasks.find(t=>t.status!=='DONE'); if(!doc||!task) return;
+  if(apiOnline){ try{ const res=await fetch(`${API_BASE}/docs/${doc.id}/links`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify({task_id:task.id, relation:'references'})}); if(res.ok){ const data=await res.json(); if(data.doc) upsertDocLocal(data.doc); toast('Doc linked to task'); saveState(); render(); return; }}catch(e){ console.warn(e); }}
+  doc.linkedTaskRecords=doc.linkedTaskRecords||[]; if(!doc.linkedTaskRecords.some(l=>l.taskId===task.id)) doc.linkedTaskRecords.push({taskId:task.id,taskName:task.name,status:task.status,assignee:task.assignee,due:task.due,relation:'references'}); doc.linkedTasks=(doc.linkedTasks||0)+1; state.knowledgeStats=computeKnowledgeStatsLocal(); toast('Doc linked locally'); saveState(); render();
+}
+async function createDecisionDemo(){
+  const doc=selectedDoc() || state.docs.find(d=>d.kind==='Decisions'); if(!doc) return; const payload={title:'Confirm v0.8 knowledge workflow', decision:'Use Docs, wiki pages, decisions, and task links as the knowledge backbone for project execution.', rationale:'This makes AI summaries traceable and keeps project context tied to live work.', owner:'Adrian Francis', status:'Accepted'};
+  if(apiOnline){ try{ const res=await fetch(`${API_BASE}/docs/${doc.id}/decisions`, {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify(payload)}); if(res.ok){ const data=await res.json(); if(data.doc) upsertDocLocal(data.doc); toast('Decision captured'); saveState(); render(); return; }}catch(e){ console.warn(e); }}
+  doc.decisions=doc.decisions||[]; doc.decisions.unshift({...payload,id:uid(),createdAt:new Date().toISOString()}); doc.decisionCount=(doc.decisionCount||0)+1; state.knowledgeStats=computeKnowledgeStatsLocal(); toast('Decision captured locally'); saveState(); render();
+}
+function showModal(title, body){
+  let el=$('.modal-pop'); if(!el){ el=document.createElement('div'); el.className='modal-pop'; document.body.appendChild(el); }
+  el.innerHTML=`<div class="modal-card"><button class="modal-close" onclick="this.closest('.modal-pop').remove()">×</button><h2>${escapeHtml(title)}</h2>${body}</div>`;
 }
 
 function renderWhiteboardsMain() {
@@ -1444,7 +1549,7 @@ function renderDataLayerCards() {
   const submissions = (state.formSubmissions || []).length;
   const runs = (state.automationRuns || []).length;
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.7 Gantt + Planner</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.8 Docs + Knowledge</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • intake actions enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Forms</span><h3>Submissions</h3><div class="value">${submissions}</div><div class="trend">AI analysis and task routing available</div><button class="btn-secondary" onclick="setModule('forms')">Open forms</button></div>
     <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">/api/automations and /api/automations/run</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
@@ -1575,10 +1680,10 @@ function renderDataLayerCards() {
   const blocks = (state.plannerBlocks || []).length;
   const events = (state.calendarEvents || []).length;
   return `<div class="cards-grid">
-    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.7 Gantt + Planner</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
+    <div class="kpi-card"><span class="badge ${apiOnline ? 'green' : 'warn'}">${apiOnline ? 'Online' : 'Offline fallback'}</span><h3>v0.8 Docs + Knowledge</h3><div class="value">${apiOnline ? 'API' : 'Local'}</div><div class="trend">${apiStatusText}</div><button class="btn-secondary" onclick="showDataLayerStatus()">Check status</button></div>
     <div class="kpi-card"><h3>Persisted tasks</h3><div class="value">${tasks}</div><div class="trend">${projects} projects • ${comments} comments • scheduling enabled</div><button class="btn-secondary" onclick="syncStateToApi(); toast('Manual sync requested')">Sync now</button></div>
     <div class="kpi-card"><span class="badge purple">Planner</span><h3>Schedule objects</h3><div class="value">${blocks + events}</div><div class="trend">${blocks} planner blocks • ${events} calendar events</div><button class="btn-secondary" onclick="setModule('planner')">Open planner</button></div>
-    <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/gantt, /api/planner and /api/automations</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
+    <div class="kpi-card"><span class="badge green">Automation</span><h3>Run history</h3><div class="value">${runs}</div><div class="trend">Forms ${submissions} • /api/docs, /api/knowledge, /api/gantt, /api/planner</div><button class="btn-secondary" onclick="window.open('/api/docs','_blank')">Open API docs</button></div>
   </div>`;
 }
 

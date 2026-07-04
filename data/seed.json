@@ -23,7 +23,7 @@
   ],
   "release": "v0.6.0",
   "backend": "FastAPI + PostgreSQL persistence + reporting engine",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "formSubmissions": [],
   "automationRuns": [],
   "taskDependencies": [

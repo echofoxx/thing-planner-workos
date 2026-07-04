@@ -1,54 +1,46 @@
-# Thing Planner WorkOS v0.7.0
+# Thing Planner WorkOS v0.8.0
 
-**Thing Planner WorkOS** is an AI-native project management/work operating system prototype inspired by modern all-in-one productivity platforms. It includes a ClickUp-style workspace shell, tasks, boards, dashboards, reports, forms, automations, docs, planner, AI assistant, and a normalized API/data foundation.
+**Thing Planner WorkOS** is an AI-native project management/work operating system prototype inspired by modern all-in-one productivity platforms. It includes a ClickUp-style workspace shell, tasks, boards, dashboards, reports, forms, automations, planner, Gantt, docs, wiki, decisions, AI assistant, and a normalized API/data foundation.
 
-## v0.7.0 release theme
+## v0.8.0 release theme
 
-**Gantt + Dependency / Critical Path Engine**
+**Docs + Knowledge / Wiki Engine**
 
-v0.7.0 makes the Gantt view operational. The app now supports normalized task dependencies, critical-path calculation, schedule-risk analysis, baseline snapshots, and dependency-aware rescheduling/cascade logic.
+v0.8.0 turns Docs from placeholders into an operational knowledge layer. The app now supports normalized docs, wiki pages, version history, structured decision records, task-linked knowledge, knowledge search, and AI document summaries.
 
-## What changed in v0.7.0
+## What changed in v0.8.0
 
-- New normalized Gantt database tables:
-  - `task_dependencies`
-  - `gantt_baselines`
-  - `gantt_risk_alerts`
-- New Gantt API endpoints:
-  - `GET /api/gantt?project_id=p1`
-  - `GET /api/gantt/critical-path?project_id=p1`
-  - `POST /api/gantt/dependencies`
-  - `DELETE /api/gantt/dependencies/{dependency_id}`
-  - `POST /api/gantt/tasks/{task_id}/schedule`
-  - `POST /api/gantt/recalculate?project_id=p1`
-  - `POST /api/gantt/baselines`
-- Critical path engine:
-  - computes longest dependency chain
-  - includes explicitly marked critical tasks
-  - flags critical blocked work
-  - calculates timeline range and projected finish date
-- Delay and dependency analysis:
-  - detects successors scheduled before predecessor finish date
-  - accounts for lag days
-  - creates risk alerts for conflicts, overdue work, and blocked critical-path tasks
-  - stores risk alerts when Gantt is recalculated
-- Dependency-aware scheduling:
-  - reschedule task start/duration from the Gantt row
-  - optional cascade to dependent successors
-  - one-click `+1d` shift
-  - automation run history for schedule recalculation
-- Gantt UI upgrades:
-  - v0.7 Gantt command center
-  - Gantt KPI cards
-  - date-scaled task bars
-  - critical-path bar styling
-  - blocked task styling
-  - dependency editor
-  - AI delay watch panel
-  - baseline capture button
-  - API-backed sync with local fallback
-- `/api/state` now serializes dependencies, baselines, and Gantt risk alerts into the frontend state.
-- `/api/health` now reports Gantt table counts.
+- New normalized knowledge tables:
+  - `doc_pages`
+  - `doc_versions`
+  - `doc_task_links`
+  - `doc_decisions`
+- New Docs and Knowledge API endpoints:
+  - `GET /api/docs`
+  - `GET /api/docs/{doc_id}`
+  - `POST /api/docs`
+  - `PATCH /api/docs/{doc_id}`
+  - `POST /api/docs/{doc_id}/links`
+  - `POST /api/docs/{doc_id}/decisions`
+  - `POST /api/docs/{doc_id}/ai-summary`
+  - `GET /api/knowledge/search?q=...`
+  - `GET /api/knowledge/hub`
+- Docs module upgrades:
+  - Knowledge command center KPI cards
+  - Docs/wiki/decision search
+  - Doc list and editor workbench
+  - Markdown-style editing area
+  - Page tabs and version history panel
+  - Linked-task insight panel
+  - Structured decisions panel
+  - AI document brief modal
+  - Local fallback mode when API is offline
+- Knowledge automation support:
+  - `auto_doc_decision`
+  - `auto_doc_ai_summary`
+  - automation run records when decisions are captured or AI summaries are generated
+- `/api/state` now serializes doc content, pages, decision counts, link counts, and knowledge stats into the frontend state.
+- `/api/health` now reports Docs/Knowledge table counts.
 
 ## What was already included
 
@@ -87,6 +79,12 @@ v0.7.0 makes the Gantt view operational. The app now supports normalized task de
   - working-hour preferences
   - AI daily schedule generation
   - focus blocks and meetings
+- v0.7 Gantt/dependencies:
+  - dependencies
+  - critical path calculation
+  - schedule risk alerts
+  - baselines
+  - dependency-aware rescheduling
 
 ## Demo login
 
@@ -101,8 +99,8 @@ The frontend auto-runs demo auth when the API is available.
 
 ```powershell
 cd C:\docker
-Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.7.0.zip" "C:\docker\thing-planner-workos-v0.7.0"
-cd C:\docker\thing-planner-workos-v0.7.0\thing-planner-workos-v0.7.0
+Expand-Archive -Force "$env:USERPROFILE\Downloads\thing-planner-workos-v0.8.0.zip" "C:\docker\thing-planner-workos-v0.8.0"
+cd C:\docker\thing-planner-workos-v0.8.0\thing-planner-workos-v0.8.0
 docker compose up --build -d
 ```
 
@@ -124,73 +122,13 @@ API docs:
 http://localhost:8098/api/docs
 ```
 
-## SQLite fallback
-
-Use this if you want a simpler local backend without PostgreSQL:
+## SQLite fallback mode
 
 ```powershell
 docker compose -f docker-compose.sqlite.yml up --build -d
 ```
 
-## Key v0.7 Gantt API endpoints
-
-```text
-GET    /api/gantt
-GET    /api/gantt/critical-path
-POST   /api/gantt/dependencies
-DELETE /api/gantt/dependencies/{dependency_id}
-POST   /api/gantt/tasks/{task_id}/schedule
-POST   /api/gantt/recalculate
-POST   /api/gantt/baselines
-```
-
-## Existing API endpoints
-
-### Planner
-
-```text
-GET    /api/planner
-POST   /api/planner/plan-my-day
-GET    /api/planner/events
-POST   /api/planner/events
-POST   /api/planner/tasks/{task_id}/schedule
-POST   /api/planner/focus-blocks
-DELETE /api/planner/blocks/{block_id}
-```
-
-### Forms
-
-```text
-GET  /api/forms
-GET  /api/forms/{form_id}
-PUT  /api/forms/{form_id}/schema
-POST /api/forms/{form_id}/submissions
-GET  /api/forms/{form_id}/submissions
-GET  /api/forms/{form_id}/analytics
-POST /api/forms/project-intake
-```
-
-### Automations
-
-```text
-GET   /api/automations
-POST  /api/automations
-PATCH /api/automations/{automation_id}/toggle
-POST  /api/automations/run
-GET   /api/automations/templates
-```
-
-### Reporting
-
-```text
-GET  /api/reports/dashboard
-GET  /api/reports/drilldown
-POST /api/reports/actions
-GET  /api/reports/cards
-POST /api/reports/cards
-```
-
-## Suggested GitHub update
+## GitHub release workflow
 
 Use your clean repo folder:
 
@@ -198,11 +136,11 @@ Use your clean repo folder:
 cd C:\docker\thing-planner-workos-git
 ```
 
-Copy the v0.7.0 files into the repo:
+Copy v0.8.0 into the repo:
 
 ```powershell
 robocopy `
-  "C:\docker\thing-planner-workos-v0.7.0\thing-planner-workos-v0.7.0" `
+  "C:\docker\thing-planner-workos-v0.8.0\thing-planner-workos-v0.8.0" `
   "C:\docker\thing-planner-workos-git" `
   /MIR `
   /XD .git .venv __pycache__ `
@@ -214,29 +152,22 @@ Commit and tag:
 ```powershell
 git status
 git add .
-git commit -m "Release Thing Planner WorkOS v0.7.0"
+git commit -m "Release Thing Planner WorkOS v0.8.0"
 git push origin main
 
-git tag -f v0.7.0
-git push origin v0.7.0 --force
+git tag -f v0.8.0
+git push origin v0.8.0 --force
 ```
 
-## Validation performed
+## Recommended next build
 
-- `python3 -m py_compile backend/app/main.py`
-- `node --check assets/app.js`
-- FastAPI SQLite smoke test against health, schema, state, Gantt dataset, critical path, recalculation, baseline creation, task rescheduling/cascade, and prior API compatibility.
-
-## Next recommended build
-
-**v0.8.0 Docs + Knowledge / Wiki Engine**
+**v0.9.0 Whiteboards + Canvas / Mind Map Engine**
 
 Recommended scope:
 
-- normalized doc pages and blocks
-- linked docs/tasks/decisions
-- rich project docs UI
-- SOP/wiki mode
-- AI doc summary/action items
-- searchable knowledge hub
-- protected docs and decision log
+- persistent whiteboards
+- sticky notes, shapes, connectors, and embedded task cards
+- convert sticky note to task
+- canvas cards linked to dashboards, goals, docs, and Gantt tasks
+- mind map view for task hierarchy and project breakdown
+- AI whiteboard summary and action-plan generation
